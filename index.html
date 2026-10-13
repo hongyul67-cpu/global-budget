@@ -102,6 +102,18 @@ dialog .bd{padding-bottom:0}
 .trow{margin-top:6px}.trow textarea{min-height:0;font-size:14px}.trow small{display:block;color:var(--sub);font-size:12.5px;margin-bottom:2px}
 .ok b{flex:1;font-size:13px;word-break:break-all}
 .ok a{text-decoration:none;white-space:nowrap}
+.grp{border-top:1px solid var(--line)}.grp:first-child{border-top:0}
+.grp summary{list-style:none;cursor:pointer}.grp summary::-webkit-details-marker{display:none}
+.grp .cat{border-top:0}.grp[open]{padding-bottom:8px}
+.arr{display:block;text-align:center;font-size:12.5px;font-weight:700;color:var(--g);background:var(--gs);border-radius:8px;padding:4px;margin-top:7px}
+.arr::after{content:' 펼쳐 보기 ▾'}.grp[open] .arr::after{content:' 접기 ▴'}
+.cat.sub .two{font-size:12px;margin-top:2px}
+.chip.bad{background:var(--bads);color:var(--bad)}
+.gh,.ih{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.gh{margin-top:14px;padding:7px 10px;border-radius:9px;background:var(--g);color:#fff;font-weight:800;font-size:14px}
+.gh span:last-child,.ih span:last-child{font-weight:600;font-size:12.5px;white-space:nowrap}
+.ih{margin-top:8px;padding:6px 10px;border-radius:8px;background:var(--gs);color:var(--g);font-weight:700;font-size:13.5px}
+.ih + .rec{border-top:0}.gh:first-child{margin-top:4px}
 .chips{display:flex;flex-wrap:wrap;gap:6px}
 .chips button{border:1px solid var(--line);background:#fff;border-radius:10px;padding:9px 12px;font-weight:700;font-size:14px}
 .chips button.on{background:var(--g);border-color:var(--g);color:#fff}
@@ -152,6 +164,7 @@ hr{border:0;border-top:1px solid var(--line);margin:16px 0 4px}
       <select id="fcat"></select>
       <button class="btn plain" id="btnCsv">엑셀 내려받기</button>
       <button class="btn plain" id="btnAtt">영수증 붙임 용지</button>
+      <button class="btn plain" id="btnView"></button>
     </div>
     <div id="list"></div>
   </div>
@@ -222,6 +235,10 @@ hr{border:0;border-top:1px solid var(--line);margin:16px 0 4px}
     </div>
 
     <hr>
+    <label class="f" for="sDrafter">기안자 <small>— 영수증 붙임 용지 맨 위에 찍히는 이름</small></label>
+    <input class="in" id="sDrafter" placeholder="이름" autocomplete="off">
+
+    <hr>
     <label class="f">예산표 <small>— 구분 · 항목 · 예산(원)</small></label>
     <div id="bRows"></div>
     <div class="act"><button class="btn plain" id="btnCatAdd">+ 줄 추가</button></div>
@@ -256,7 +273,7 @@ hr{border:0;border-top:1px solid var(--line);margin:16px 0 4px}
 <dialog id="dlgAtt">
   <div class="hd"><h3>영수증 붙임 용지 만들기</h3><button data-close aria-label="닫기">×</button></div>
   <div class="bd">
-    <p style="margin:0 0 4px"><b>지출 한 건에 한 장씩</b>, 맨 위에 품의 제목 · 사용일 · 기안자 · 영수증 번호를 적고 그 아래 영수증 사진을 붙인 PDF 를 구글 드라이브에 만듭니다. 번호는 엑셀의 번호와 같습니다.</p>
+    <p style="margin:0 0 4px">붙임 용지는 <b>지출을 저장할 때마다 한 장씩 자동으로</b> 드라이브 「붙임 용지」 폴더에 생깁니다. 여기서는 고른 기간의 것을 <b>PDF 한 개로 묶어</b> 한꺼번에 인쇄할 수 있게 만듭니다.</p>
     <div class="g2">
       <div><label class="f" for="tFrom">시작일</label><input class="in" type="date" id="tFrom"></div>
       <div><label class="f" for="tTo">종료일</label><input class="in" type="date" id="tTo"></div>
@@ -344,6 +361,7 @@ function today() { const d = new Date(); return `${d.getFullYear()}-${p2(d.getMo
 
 let S = load();
 let busy = false, lastErr = '', delId = null;
+const OPEN = new Set();   // 「구분 · 항목별」에서 펼쳐 둔 구분 이름
 let F = null;   // 지금 쓰고 있는 입력 내용
 
 function load() {
@@ -451,11 +469,18 @@ function render() {
 
   const names = gs.map((g) => g.name);
   const known = (r) => c.items.some((x) => x.cat === r.cat && x.item === r.item);
-  let html = gs.map((g) => catRow(g.name, g.budget, recs.filter((r) => r.cat === g.name), false)
-    + g.items.map((x) => catRow(x.item, x.budget, recs.filter((r) => r.cat === x.cat && r.item === x.item), true)).join('')).join('');
+  // 구분 한 줄만 보이고, 누르면 그 아래 항목이 펼쳐진다(펼친 상태는 OPEN 에 기억)
+  let html = gs.map((g) => {
+    const gl = recs.filter((r) => r.cat === g.name);
+    const rows = g.items.map((x) => ({x, l: gl.filter((r) => r.item === x.item)}));
+    const over = rows.filter((o) => o.l.reduce((a, r) => a + r.total, 0) > (Number(o.x.budget) || 0)).length;
+    return `<details class="grp" data-g="${esc(g.name)}"${OPEN.has(g.name) ? ' open' : ''}><summary>${catRow(g.name, g.budget, gl, false, g.items.length, over)}</summary>`
+      + rows.map((o) => catRow(o.x.item, o.x.budget, o.l, true)).join('') + '</details>';
+  }).join('');
   const stray = recs.filter((r) => !known(r));
   if (stray.length) html += catRow('예산표에 없는 항목', 0, stray, false);
   $('cats').innerHTML = html;
+  document.querySelectorAll('#cats details').forEach((d) => (d.ontoggle = () => (d.open ? OPEN.add(d.dataset.g) : OPEN.delete(d.dataset.g))));
   document.querySelectorAll('#cats .bar').forEach((b) => setBar(b, +b.dataset.u, +b.dataset.b));
 
   const cur = $('fcat').value;
@@ -465,13 +490,16 @@ function render() {
   renderSync();
 }
 
-function catRow(name, budget, list, sub) {
+function catRow(name, budget, list, sub, nItems, over) {
   const u = list.reduce((a, r) => a + r.total, 0);
   if (sub) return `<div class="cat sub"><div class="top"><span class="nm">${esc(name)}</span><span>${won(u)} / ${won(budget)}원</span></div>
-    <div class="bar" data-u="${u}" data-b="${Number(budget) || 0}"><i></i></div></div>`;
+    <div class="bar" data-u="${u}" data-b="${Number(budget) || 0}"><i></i></div>
+    <div class="two"><span>${list.length}건</span><span>잔액 ${won(budget - u)}원</span></div></div>`;
+  const fold = nItems ? `<span class="arr">항목 ${nItems}개</span>` : '';
+  const warn = over ? ` <span class="chip bad">예산 넘은 항목 ${over}개</span>` : '';
   return `<div class="cat"><div class="top"><b>${esc(name)}</b><span>${won(u)} / ${won(budget)}원</span></div>
     <div class="bar" data-u="${u}" data-b="${Number(budget) || 0}"><i></i></div>
-    <div class="two"><span>${list.length}건</span><span>잔액 <b>${won(budget - u)}원</b></span></div></div>`;
+    <div class="two"><span>${list.length}건${warn}</span><span>잔액 <b>${won(budget - u)}원</b></span></div>${fold}</div>`;
 }
 
 function setBar(el, u, b) {
@@ -484,12 +512,36 @@ function renderList() {
   const q = $('q').value.trim().toLowerCase(), fc = $('fcat').value;
   const list = S.recs.filter((r) => (!fc || r.cat === fc) && (!q || ('no.' + r.no + ' ' + r.place + ' ' + (r.item || '') + ' ' + (r.memo || '')).toLowerCase().includes(q)))
     .sort((a, b) => (b.date + b.ts).localeCompare(a.date + a.ts));
+  const grouped = S.cfg.view !== 'new';
+  $('btnView').textContent = grouped ? '최신순으로 보기' : '항목별로 묶어 보기';
   $('cnt').textContent = `${live().length}건`;
   if (!list.length) {
     $('list').innerHTML = `<div class="empty">${S.recs.length ? '찾는 지출이 없습니다.' : '아직 기록이 없습니다.<br>아래 초록 단추로 첫 영수증을 찍어 보세요.'}</div>`;
     return;
   }
-  $('list').innerHTML = list.map((r) => {
+  if (!grouped) { $('list').innerHTML = list.map(recRow).join(''); return; }
+  // 예산표 순서대로 구분 › 항목 제목을 달고, 그 아래에 그 항목의 지출을 번호 순으로 모은다
+  const head = (cls, name, l) => { const v = l.filter((r) => !r.del);
+    return `<div class="${cls}"><span>${esc(name)}</span><span>${v.length}건 · ${won(v.reduce((a, r) => a + r.total, 0))}원</span></div>`; };
+  const byNo = (a, b) => (a.no || 0) - (b.no || 0), seen = new Set();
+  let html = '';
+  for (const g of groups()) {
+    const gl = list.filter((r) => r.cat === g.name && g.items.some((x) => x.item === r.item));
+    if (!gl.length) continue;
+    html += head('gh', g.name, gl);
+    for (const x of g.items) {
+      const il = gl.filter((r) => r.item === x.item).sort(byNo);
+      if (!il.length) continue;
+      il.forEach((r) => seen.add(r.id));
+      html += head('ih', x.item, il) + il.map(recRow).join('');
+    }
+  }
+  const rest = list.filter((r) => !seen.has(r.id)).sort(byNo);
+  if (rest.length) html += head('gh', '예산표에 없는 항목', rest) + rest.map(recRow).join('');
+  $('list').innerHTML = html;
+}
+
+function recRow(r) {
     const amt = r.cur === 'KRW' ? `${won(r.amt)}원` : `${r.amt.toFixed(2)} ${r.cur}`;
     const sub = r.cur === 'KRW' ? '' : `${won(r.krw)}원` + (r.fee ? ` + 여유분 ${won(r.fee)}원` : '');
     const links = (r.links || []).map((u, i) => `<a href="${esc(u)}" target="_blank" rel="noopener">영수증 ${i + 1}</a>`).join(' ');
@@ -500,9 +552,8 @@ function renderList() {
       <div class="l1"><span><i class="no">No. ${esc(r.no)}</i>${esc(r.place)}</span><span>${amt}</span></div>
       <div class="l2"><span>${esc(r.date)} · ${esc(r.item || r.cat)}</span><span>${sub}</span></div>
       ${r.memo ? `<div class="l2"><span>${esc(r.memo)}</span></div>` : ''}
-      <div class="l3">${r.del ? '<span class="chip gray">취소됨</span>' : st} ${links}
+      <div class="l3">${r.del ? '<span class="chip gray">취소됨</span>' : st} ${links}${r.pdf ? ` <a href="${esc(r.pdf)}" target="_blank" rel="noopener">붙임 용지</a>` : ''}
         ${r.del ? '' : `<button class="x" data-del="${esc(r.id)}">지출 취소</button>`}</div></div>`;
-  }).join('');
 }
 
 function renderSync() {
@@ -541,10 +592,12 @@ async function syncAll() {
       if (r.del) { if (r.sent) await post({action: 'cancel', id: r.id}); }
       else {
         const ph = await photos.get(r.id);
-        const j = await post({action: 'add', photos: ph.map((d) => d.split(',')[1]),
+        const att = attCfg();
+        const j = await post({action: 'add', photos: ph.map((d) => d.split(',')[1]), titles: att.titles, drafter: att.drafter,
           rec: {id: r.id, date: r.date, place: r.place, cat: r.cat, item: r.item, cur: r.cur, amt: r.amt, expr: r.expr,
                 rate: r.rate, krw: r.krw, fee: r.fee, total: r.total, memo: r.memo, no: r.no}});
-        r.links = j.links || []; r.sent = true;
+        r.links = j.links || []; r.pdf = j.pdf || ''; r.sent = true;
+        if (j.pdfError) toast('지출은 저장했지만 붙임 용지 PDF 를 만들지 못했습니다: ' + j.pdfError, 6000);
         await photos.del(r.id);
       }
       r.sync = 'done'; save(); renderList(); renderSync();
@@ -632,7 +685,7 @@ async function saveRec() {
 /* ---------- 설정 ---------- */
 function openSet() {
   const c = S.cfg;
-  $('sUrl').value = c.url; $('sAUD').value = c.rates.AUD; $('sUSD').value = c.rates.USD; $('sFee').value = c.feePct;
+  $('sUrl').value = c.url; $('sAUD').value = c.rates.AUD; $('sUSD').value = c.rates.USD; $('sFee').value = c.feePct; $('sDrafter').value = attCfg().drafter;
   $('sErr').textContent = ''; $('pingMsg').textContent = ''; $('pingMsg').className = 'note';
   $('bRows').innerHTML = ''; c.items.forEach((x) => addCatRow(x.cat, x.item, x.budget));
   drawOpeners(); $('dlgSet').showModal();
@@ -679,6 +732,7 @@ function saveSet() {
   const c = S.cfg;
   if (aud !== c.rates.AUD || usd !== c.rates.USD) { c.rateAuto = false; c.rates = {AUD: aud, USD: usd}; }
   c.items = rows; c.feePct = fee; c.url = u;
+  c.att = Object.assign({titles: {}}, c.att, {drafter: $('sDrafter').value.trim()});
   save(); $('dlgSet').close(); render(); toast('설정을 저장했습니다');
   pushBudget().then(syncAll);
 }
@@ -744,9 +798,9 @@ function excel() {
   if (stray.length) { const u = sum(stray); a.push(['예산표에 없는 항목', '', N(0), N(u), N(-u), P(0), N(stray.length)]); tu += u; tn += stray.length; }
   a.push([B('합계'), B(''), BN(tb), BN(tu), BN(tb - tu), BP(pct(tu, tb)), BN(tn)]);
 
-  const b = [['번호', '날짜', '구분', '항목', '지출처', '통화', '금액', '환율', '원화 환산', '수수료 여유분', '합계(원)', '실제 카드 청구액(원)', '메모', '영수증 링크', '상태'].map(H)];
+  const b = [['번호', '날짜', '구분', '항목', '지출처', '통화', '금액', '환율', '원화 환산', '수수료 여유분', '합계(원)', '실제 카드 청구액(원)', '메모', '영수증 링크', '붙임 용지 PDF', '상태'].map(H)];
   S.recs.slice().sort((x, y) => (x.no || 0) - (y.no || 0)).forEach((r) =>
-    b.push([N(r.no || 0), r.date, r.cat, r.item || '', r.place, r.cur, D(r.amt), D(r.rate), N(r.krw), N(r.fee), N(r.total), '', r.memo || '', (r.links || []).join('\n'), r.del ? '취소' : (r.sent ? '정상' : '정상(드라이브 올리기 전)')]));
+    b.push([N(r.no || 0), r.date, r.cat, r.item || '', r.place, r.cur, D(r.amt), D(r.rate), N(r.krw), N(r.fee), N(r.total), '', r.memo || '', (r.links || []).join('\n'), r.pdf || '', r.del ? '취소' : (r.sent ? '정상' : '정상(드라이브 올리기 전)')]));
 
   const X = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
   const bd = '<border><left style="thin"/><right style="thin"/><top style="thin"/><bottom style="thin"/><diagonal/></border>';
@@ -759,7 +813,7 @@ function excel() {
     {name: 'xl/styles.xml', text: X + '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="164" formatCode="0.0%"/></numFmts><fonts count="2"><font><sz val="10"/><name val="맑은 고딕"/></font><font><b/><sz val="10"/><name val="맑은 고딕"/></font></fonts><fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFDCEFE6"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFF1F5F3"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border>' + bd + '</borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="9"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
       + xf(0, 1, 2, ' horizontal="center"') + xf(0, 0, 0) + xf(3, 0, 0) + xf(4, 0, 0) + xf(164, 0, 0) + xf(0, 1, 3) + xf(3, 1, 3) + xf(164, 1, 3) + '</cellXfs></styleSheet>'},
     {name: 'xl/worksheets/sheet1.xml', text: sheetXml(a, [24, 32, 14, 14, 14, 10, 8])},
-    {name: 'xl/worksheets/sheet2.xml', text: sheetXml(b, [7, 12, 22, 28, 24, 7, 11, 9, 13, 12, 13, 14, 24, 40, 12])},
+    {name: 'xl/worksheets/sheet2.xml', text: sheetXml(b, [7, 12, 22, 28, 24, 7, 11, 9, 13, 12, 13, 14, 24, 40, 40, 12])},
   ]);
   const d = new Date(), el = document.createElement('a');
   el.href = URL.createObjectURL(blob);
@@ -770,6 +824,12 @@ function excel() {
 }
 
 /* ---------- 영수증 붙임 용지(PDF) ---------- */
+// 붙임 용지 맨 위에 찍을 기안자·품의 제목. 따로 적은 적이 없으면 기안문 제목(TITLES)을 쓴다.
+function attCfg() {
+  const a = S.cfg.att || {}, t = a.titles || {}, titles = {};
+  groups().forEach((g) => (titles[g.name] = g.name in t ? t[g.name] : (TITLES[g.name] || '')));
+  return {drafter: a.drafter || '', titles};
+}
 function attInfo() {
   const a = $('tFrom').value, b = $('tTo').value;
   const l = live().filter((r) => (!a || r.date >= a) && (!b || r.date <= b));
@@ -785,9 +845,9 @@ function openAtt() {
   const d = live().map((r) => r.date).sort();
   $('tFrom').value = d[0] || today(); $('tTo').value = d[d.length - 1] || today();
   // 기안자와 품의 제목은 한 번 적으면 이 기기에 기억해 둔다
-  const att = S.cfg.att || {drafter: '', titles: {}};
-  $('tDrafter').value = att.drafter || '';
-  $('tTitles').innerHTML = groups().map((g) => `<div class="trow"><small>${esc(g.name)}</small><textarea class="in" rows="2" data-cat="${esc(g.name)}">${esc(g.name in att.titles ? att.titles[g.name] : (TITLES[g.name] || ''))}</textarea></div>`).join('');
+  const att = attCfg();
+  $('tDrafter').value = att.drafter;
+  $('tTitles').innerHTML = groups().map((g) => `<div class="trow"><small>${esc(g.name)}</small><textarea class="in" rows="2" data-cat="${esc(g.name)}">${esc(att.titles[g.name])}</textarea></div>`).join('');
   $('tErr').textContent = ''; $('tOk').hidden = true; attInfo(); $('dlgAtt').showModal();
 }
 async function makeAtt() {
@@ -810,6 +870,7 @@ async function makeAtt() {
 
 /* ---------- 단추 연결 ---------- */
 $('btnAtt').onclick = openAtt;
+$('btnView').onclick = () => { S.cfg.view = S.cfg.view === 'new' ? 'item' : 'new'; save(); renderList(); };
 $('btnAttGo').onclick = makeAtt;
 $('tFrom').onchange = $('tTo').onchange = attInfo;
 $('btnAdd').onclick = openAdd;
