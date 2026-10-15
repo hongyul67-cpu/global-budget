@@ -189,6 +189,8 @@ hr{border:0;border-top:1px solid var(--line);margin:16px 0 4px}
     <div class="chips" id="segCat"></div>
     <label class="f">항목 <small>— 예산표의 어느 줄에서 쓰는 돈인지</small></label>
     <div class="chips" id="segItem"></div>
+    <label class="f">카드 <small>— 붙임 용지의 카드번호(끝 4자리) 칸에 들어갑니다</small></label>
+    <div class="seg" id="segCard"></div>
     <label class="f" for="aDate">날짜</label>
     <input class="in" type="date" id="aDate">
     <label class="f" for="aPlace">지출처 · 내역</label>
@@ -235,8 +237,12 @@ hr{border:0;border-top:1px solid var(--line);margin:16px 0 4px}
     </div>
 
     <hr>
-    <label class="f" for="sDrafter">기안자 <small>— 영수증 붙임 용지 맨 위에 찍히는 이름</small></label>
+    <label class="f" for="sDrafter">품의자 <small>— 붙임 용지의 품의자 · 신용카드 사용자 성명</small></label>
     <input class="in" id="sDrafter" placeholder="이름" autocomplete="off">
+    <div class="g2">
+      <div><label class="f" for="sCard1">주 카드 끝 4자리</label><input class="in" id="sCard1" inputmode="numeric" maxlength="4"></div>
+      <div><label class="f" for="sCard2">보조 카드 끝 4자리</label><input class="in" id="sCard2" inputmode="numeric" maxlength="4"></div>
+    </div>
 
     <hr>
     <label class="f">예산표 <small>— 구분 · 항목 · 예산(원)</small></label>
@@ -273,13 +279,13 @@ hr{border:0;border-top:1px solid var(--line);margin:16px 0 4px}
 <dialog id="dlgAtt">
   <div class="hd"><h3>영수증 붙임 용지 만들기</h3><button data-close aria-label="닫기">×</button></div>
   <div class="bd">
-    <p style="margin:0 0 4px">붙임 용지는 <b>지출을 저장할 때마다 한 장씩 자동으로</b> 드라이브 「붙임 용지」 폴더에 생깁니다. 여기서는 고른 기간의 것을 <b>PDF 한 개로 묶어</b> 한꺼번에 인쇄할 수 있게 만듭니다.</p>
+    <p style="margin:0 0 4px">붙임 용지(학교 「신용카드 사용 후 제출 서식」)는 <b>지출을 저장할 때마다 한 장씩 자동으로</b> 드라이브 「붙임 용지」 폴더에 생깁니다. 여기서는 고른 기간의 것을 <b>PDF 한 개로 묶어</b> 한꺼번에 인쇄할 수 있게 만듭니다.</p>
     <div class="g2">
       <div><label class="f" for="tFrom">시작일</label><input class="in" type="date" id="tFrom"></div>
       <div><label class="f" for="tTo">종료일</label><input class="in" type="date" id="tTo"></div>
     </div>
     <p class="note" id="tInfo"></p>
-    <label class="f" for="tDrafter">기안자</label>
+    <label class="f" for="tDrafter">품의자</label>
     <input class="in" id="tDrafter" placeholder="이름" autocomplete="off">
     <label class="f">품의 제목 <small>— 구분마다 한 줄. 비워 두면 빈칸으로 나와 손으로 적을 수 있습니다</small></label>
     <div id="tTitles"></div>
@@ -318,6 +324,9 @@ const LS = 'gbudget.v2';
 const RATE_API = 'https://open.er-api.com/v6/latest/USD';
 const DEF = {
   url: '', book: '', folder: '', feePct: 2,
+  // 학교 카드(끝 4자리). 지출을 적을 때 고른다. 첫째가 기본.
+  cards: [{no: '8020', name: '주'}, {no: '8012', name: '보조'}],
+  drafter: '윤홍열',     // 품의자 = 신용카드 사용자 성명(붙임 용지에 찍힘)
   // 예산표 한 줄 = 구분(cat) · 항목(item) · 예산(원)
   items: [
     {cat: '식사 및 간식비', item: '식사비', budget: 3360000},
@@ -550,7 +559,7 @@ function recRow(r) {
       : `<span class="chip wait">올리기 대기${r.nPhoto ? ' · 사진 ' + r.nPhoto + '장' : ''}</span>`;
     return `<div class="rec${r.del ? ' del' : ''}">
       <div class="l1"><span><i class="no">No. ${esc(r.no)}</i>${esc(r.place)}</span><span>${amt}</span></div>
-      <div class="l2"><span>${esc(r.date)} · ${esc(r.item || r.cat)}</span><span>${sub}</span></div>
+      <div class="l2"><span>${esc(r.date)} · ${esc(r.item || r.cat)}${r.card ? ' · 카드 ' + esc(r.card) : ''}</span><span>${sub}</span></div>
       ${r.memo ? `<div class="l2"><span>${esc(r.memo)}</span></div>` : ''}
       <div class="l3">${r.del ? '<span class="chip gray">취소됨</span>' : st} ${links}${r.pdf ? ` <a href="${esc(r.pdf)}" target="_blank" rel="noopener">붙임 용지</a>` : ''}
         ${r.del ? '' : `<button class="x" data-del="${esc(r.id)}">지출 취소</button>`}</div></div>`;
@@ -595,7 +604,7 @@ async function syncAll() {
         const att = attCfg();
         const j = await post({action: 'add', photos: ph.map((d) => d.split(',')[1]), titles: att.titles, drafter: att.drafter,
           rec: {id: r.id, date: r.date, place: r.place, cat: r.cat, item: r.item, cur: r.cur, amt: r.amt, expr: r.expr,
-                rate: r.rate, krw: r.krw, fee: r.fee, total: r.total, memo: r.memo, no: r.no}});
+                rate: r.rate, krw: r.krw, fee: r.fee, total: r.total, memo: r.memo, no: r.no, card: r.card || ''}});
         r.links = j.links || []; r.pdf = j.pdf || ''; r.sent = true;
         if (j.pdfError) toast('지출은 저장했지만 붙임 용지 PDF 를 만들지 못했습니다: ' + j.pdfError, 6000);
         await photos.del(r.id);
@@ -627,7 +636,7 @@ async function getRate(manual) {
 /* ---------- 지출 입력 ---------- */
 function openAdd() {
   const g0 = groups()[0];
-  F = {cur: 'AUD', shots: [], cat: g0 ? g0.name : '', item: ''};
+  F = {cur: 'AUD', card: (S.cfg.cards[0] || {}).no || '', shots: [], cat: g0 ? g0.name : '', item: ''};
   if (g0 && g0.items.length === 1) F.item = g0.items[0].item;
   $('aDate').value = today(); $('aPlace').value = ''; $('aAmt').value = ''; $('aMemo').value = ''; $('aErr').textContent = '';
   drawForm(); $('dlgAdd').showModal();
@@ -637,6 +646,7 @@ function drawForm() {
   document.querySelectorAll('#segCur button').forEach((b) => b.classList.toggle('on', b.dataset.v === F.cur));
   const gs = groups(), g = gs.find((x) => x.name === F.cat);
   $('segCat').innerHTML = gs.map((x) => `<button type="button" data-v="${esc(x.name)}" class="${x.name === F.cat ? 'on' : ''}">${esc(x.name)}</button>`).join('');
+  $('segCard').innerHTML = S.cfg.cards.map((c) => `<button type="button" data-v="${esc(c.no)}" class="${c.no === F.card ? 'on' : ''}">${esc(c.no)} (${esc(c.name)})</button>`).join('');
   $('segItem').innerHTML = (g ? g.items : []).map((x) => `<button type="button" data-v="${esc(x.item)}" class="${x.item === F.item ? 'on' : ''}">${esc(x.item)}</button>`).join('');
   $('shots').innerHTML = F.shots.map((d, i) => `<div class="shot"><img src="${d}" alt="영수증 ${i + 1}"><button type="button" data-rm="${i}" aria-label="사진 빼기">×</button></div>`).join('');
   const raw = $('aAmt').value.trim(), v = calc(raw), box = $('calc');
@@ -671,7 +681,7 @@ async function saveRec() {
   if (!m.rate) return ($('aErr').textContent = '환율이 0 입니다. 설정에서 환율을 넣어 주세요.');
   const no = S.recs.reduce((a, x) => Math.max(a, Number(x.no) || 0), 0) + 1;   // 영수증 번호(취소해도 다시 쓰지 않는다)
   const r = {id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), ts: Date.now(), no, date, place,
-    cat: F.cat, item: F.item, cur: F.cur, amt, expr: raw, rate: m.rate, krw: m.krw, fee: m.fee, total: m.total,
+    cat: F.cat, item: F.item, cur: F.cur, amt, expr: raw, rate: m.rate, krw: m.krw, fee: m.fee, total: m.total, card: F.card,
     memo: $('aMemo').value.trim(), nPhoto: F.shots.length, links: [], sent: false, del: false, sync: 'pending'};
   $('btnSave').disabled = true;
   const kept = F.shots.length ? await photos.put(r.id, F.shots) : true;
@@ -686,6 +696,7 @@ async function saveRec() {
 function openSet() {
   const c = S.cfg;
   $('sUrl').value = c.url; $('sAUD').value = c.rates.AUD; $('sUSD').value = c.rates.USD; $('sFee').value = c.feePct; $('sDrafter').value = attCfg().drafter;
+  $('sCard1').value = (c.cards[0] || {}).no || ''; $('sCard2').value = (c.cards[1] || {}).no || '';
   $('sErr').textContent = ''; $('pingMsg').textContent = ''; $('pingMsg').className = 'note';
   $('bRows').innerHTML = ''; c.items.forEach((x) => addCatRow(x.cat, x.item, x.budget));
   drawOpeners(); $('dlgSet').showModal();
@@ -722,6 +733,8 @@ function saveSet() {
     return {cat: i[0].value.trim(), item: i[1].value.trim(), budget: Number(i[2].value.replace(/[^\d.]/g, '')) || 0};
   }).filter((x) => x.cat || x.item);
   const aud = Number($('sAUD').value), usd = Number($('sUSD').value), fee = Number($('sFee').value);
+  const k1 = $('sCard1').value.trim(), k2 = $('sCard2').value.trim();
+  if (!/^\d{4}$/.test(k1) || (k2 && !/^\d{4}$/.test(k2))) return ($('sErr').textContent = '카드 번호는 끝 4자리 숫자로 적어 주세요(보조 카드는 비워도 됩니다).');
   const u = $('sUrl').value.trim();
   if (!rows.length) return ($('sErr').textContent = '예산표에 한 줄은 있어야 합니다.');
   if (rows.some((x) => !x.cat || !x.item)) return ($('sErr').textContent = '구분과 항목 이름을 모두 적어 주세요.');
@@ -733,6 +746,7 @@ function saveSet() {
   if (aud !== c.rates.AUD || usd !== c.rates.USD) { c.rateAuto = false; c.rates = {AUD: aud, USD: usd}; }
   c.items = rows; c.feePct = fee; c.url = u;
   c.att = Object.assign({titles: {}}, c.att, {drafter: $('sDrafter').value.trim()});
+  c.cards = [{no: k1, name: '주'}].concat(k2 ? [{no: k2, name: '보조'}] : []);
   save(); $('dlgSet').close(); render(); toast('설정을 저장했습니다');
   pushBudget().then(syncAll);
 }
@@ -798,9 +812,9 @@ function excel() {
   if (stray.length) { const u = sum(stray); a.push(['예산표에 없는 항목', '', N(0), N(u), N(-u), P(0), N(stray.length)]); tu += u; tn += stray.length; }
   a.push([B('합계'), B(''), BN(tb), BN(tu), BN(tb - tu), BP(pct(tu, tb)), BN(tn)]);
 
-  const b = [['번호', '날짜', '구분', '항목', '지출처', '통화', '금액', '환율', '원화 환산', '수수료 여유분', '합계(원)', '실제 카드 청구액(원)', '메모', '영수증 링크', '붙임 용지 PDF', '상태'].map(H)];
+  const b = [['번호', '날짜', '구분', '항목', '지출처', '카드', '통화', '금액', '환율', '원화 환산', '수수료 여유분', '합계(원)', '실제 카드 청구액(원)', '메모', '영수증 링크', '붙임 용지 PDF', '상태'].map(H)];
   S.recs.slice().sort((x, y) => (x.no || 0) - (y.no || 0)).forEach((r) =>
-    b.push([N(r.no || 0), r.date, r.cat, r.item || '', r.place, r.cur, D(r.amt), D(r.rate), N(r.krw), N(r.fee), N(r.total), '', r.memo || '', (r.links || []).join('\n'), r.pdf || '', r.del ? '취소' : (r.sent ? '정상' : '정상(드라이브 올리기 전)')]));
+    b.push([N(r.no || 0), r.date, r.cat, r.item || '', r.place, r.card || '', r.cur, D(r.amt), D(r.rate), N(r.krw), N(r.fee), N(r.total), '', r.memo || '', (r.links || []).join('\n'), r.pdf || '', r.del ? '취소' : (r.sent ? '정상' : '정상(드라이브 올리기 전)')]));
 
   const X = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
   const bd = '<border><left style="thin"/><right style="thin"/><top style="thin"/><bottom style="thin"/><diagonal/></border>';
@@ -813,7 +827,7 @@ function excel() {
     {name: 'xl/styles.xml', text: X + '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="164" formatCode="0.0%"/></numFmts><fonts count="2"><font><sz val="10"/><name val="맑은 고딕"/></font><font><b/><sz val="10"/><name val="맑은 고딕"/></font></fonts><fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFDCEFE6"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFF1F5F3"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border>' + bd + '</borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="9"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
       + xf(0, 1, 2, ' horizontal="center"') + xf(0, 0, 0) + xf(3, 0, 0) + xf(4, 0, 0) + xf(164, 0, 0) + xf(0, 1, 3) + xf(3, 1, 3) + xf(164, 1, 3) + '</cellXfs></styleSheet>'},
     {name: 'xl/worksheets/sheet1.xml', text: sheetXml(a, [24, 32, 14, 14, 14, 10, 8])},
-    {name: 'xl/worksheets/sheet2.xml', text: sheetXml(b, [7, 12, 22, 28, 24, 7, 11, 9, 13, 12, 13, 14, 24, 40, 40, 12])},
+    {name: 'xl/worksheets/sheet2.xml', text: sheetXml(b, [7, 12, 22, 28, 24, 7, 7, 11, 9, 13, 12, 13, 14, 24, 40, 40, 12])},
   ]);
   const d = new Date(), el = document.createElement('a');
   el.href = URL.createObjectURL(blob);
@@ -828,7 +842,7 @@ function excel() {
 function attCfg() {
   const a = S.cfg.att || {}, t = a.titles || {}, titles = {};
   groups().forEach((g) => (titles[g.name] = g.name in t ? t[g.name] : (TITLES[g.name] || '')));
-  return {drafter: a.drafter || '', titles};
+  return {drafter: 'drafter' in a ? a.drafter : (S.cfg.drafter || ''), titles};
 }
 function attInfo() {
   const a = $('tFrom').value, b = $('tTo').value;
@@ -891,6 +905,7 @@ $('q').oninput = renderList;
 $('fcat').onchange = renderList;
 $('segCat').onclick = (e) => { const b = e.target.closest('button'); if (!b || b.dataset.v === F.cat) return;
   F.cat = b.dataset.v; const g = groups().find((x) => x.name === F.cat); F.item = g && g.items.length === 1 ? g.items[0].item : ''; drawForm(); };
+$('segCard').onclick = (e) => { const b = e.target.closest('button'); if (b) { F.card = b.dataset.v; drawForm(); } };
 $('segItem').onclick = (e) => { const b = e.target.closest('button'); if (b) { F.item = b.dataset.v; $('aErr').textContent = ''; drawForm(); } };
 $('segCur').onclick = (e) => { const b = e.target.closest('button'); if (b) { F.cur = b.dataset.v; drawForm(); } };
 $('shots').onclick = (e) => { const b = e.target.closest('[data-rm]'); if (b) { F.shots.splice(+b.dataset.rm, 1); drawForm(); } };

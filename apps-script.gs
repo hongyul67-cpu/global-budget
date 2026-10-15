@@ -13,17 +13,17 @@
  * [처음 배포]  script.google.com → 새 프로젝트 → 이 코드 붙여넣기 → 저장
  *   → 배포 → 새 배포 → 웹 앱 / 실행: 나 / 액세스: 모든 사용자 → 나온 URL 을 앱 ⚙ 설정에 붙여넣기
  * [코드 고친 뒤]  배포 → 배포 관리 → (기존 배포) 연필 → 버전 "새 버전" → 배포  (URL 유지)
- * [확인]  URL 을 브라우저로 열어 build 값이 "budget-v6" 이면 이 버전이 라이브
+ * [확인]  URL 을 브라우저로 열어 build 값이 "budget-v7" 이면 이 버전이 라이브
  */
 const TOKEN = 'gbudget-2026';
-const BUILD = 'budget-v6';
+const BUILD = 'budget-v7';
 const RECEIPT_FOLDER = '글로벌 현장학습 영수증';
 const ATTACH_FOLDER = '붙임 용지';
 const BOOK_NAME = '글로벌 현장학습 지출 장부';
 const SHEET_LOG = '지출';
 const SHEET_SUM = '요약';
 const HEAD = ['번호', '날짜', '지출처', '구분', '항목', '통화', '금액', '환율', '원화 환산',
-  '카드 수수료 여유분', '합계(원)', '메모', '영수증 링크', '상태', '기록시각', '계산식', 'id', '붙임 용지 PDF'];
+  '카드 수수료 여유분', '합계(원)', '메모', '영수증 링크', '상태', '기록시각', '계산식', 'id', '붙임 용지 PDF', '카드(끝 4자리)'];
 const COL_ID = 17, COL_LINK = 13, COL_STATE = 14, COL_PDF = 18;
 
 function doGet() {
@@ -73,12 +73,12 @@ function add_(data) {
   });
 
   sheet.appendRow([r.no, r.date, r.place, r.cat, r.item, r.cur, r.amt, r.rate, r.krw,
-    r.fee, r.total, r.memo || '', links.join('\n'), '정상', new Date(), "'" + (r.expr || ''), r.id, '']);
+    r.fee, r.total, r.memo || '', links.join('\n'), '정상', new Date(), "'" + (r.expr || ''), r.id, '', r.card || '']);
 
   // 이 지출의 붙임 용지 PDF 한 장. 여기서 실패해도 지출 기록과 사진은 이미 저장된 상태다.
   var pdf = '', pdfError = '';
   try {
-    pdf = attachOne_({ no: r.no, date: r.date, place: r.place, cat: r.cat, item: r.item, cur: r.cur, amt: r.amt,
+    pdf = attachOne_({ no: r.no, card: r.card || '', date: r.date, place: r.place, cat: r.cat, item: r.item, cur: r.cur, amt: r.amt,
       rate: r.rate, krw: r.krw, fee: r.fee, total: r.total, memo: r.memo || '', links: links },
       data.titles, data.drafter).getUrl();
     sheet.getRange(sheet.getLastRow(), COL_PDF).setValue(pdf);
@@ -108,7 +108,7 @@ function list_() {
     return { no: Number(v[0]) || 0, date: d, place: String(v[2]), cat: String(v[3]), item: String(v[4]),
       cur: String(v[5]), amt: Number(v[6]), rate: Number(v[7]), krw: Number(v[8]), fee: Number(v[9]),
       total: Number(v[10]), memo: String(v[11]), links: link ? link.split('\n') : [],
-      del: String(v[13]) === '취소', expr: String(v[15]), id: String(v[16]), pdf: String(v[17] || '') };
+      del: String(v[13]) === '취소', expr: String(v[15]), id: String(v[16]), pdf: String(v[17] || ''), card: String(v[18] || '') };
   });
   return { ok: true, recs: recs };
 }
@@ -175,72 +175,98 @@ function attachSave_(doc, name) {
   return pdf;
 }
 
-// 붙임 용지 한 장을 body 에 그린다. first = 문서의 첫 장인지, stat = {photos, missing} 세는 곳
+// 붙임 용지 한 장을 body 에 그린다 — 학교 「신용카드 사용 후 제출 서식」 모양.
+//   맨 위: <신용카드 사용 후 제출 서식>
+//   머리 줄: 품의제목 | 카드번호(끝 4자리) | 품의자
+//   큰 칸: 안내 2줄 + (장부에서 찾을 수 있게) 번호·사용일·금액 한 줄 + 영수증 사진 + 카드 사용자 성명
+// first = 문서의 첫 장인지, stat = {photos, missing} 세는 곳
 function attachPage_(body, r, titles, drafter, first, stat) {
-  var GREEN = '#DCEFE6', W = 523;                // A4(595pt)에서 좌우 여백 36pt 를 뺀 너비
+  var W = 523;                                   // A4(595pt)에서 좌우 여백 36pt 를 뺀 너비
   var fmt = function (n) { return String(Math.round(Number(n) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, ','); };
   var amount = r.cur === 'KRW' ? fmt(r.amt) + '원' : Number(r.amt).toFixed(2) + ' ' + r.cur;
-  // 머리표 한 줄: [이름칸, 값, 이름칸, 값 …]. 이름칸은 초록 바탕.
-  // 빈 칸은 글자 서식을 받지 않을 수 있어 실패해도 넘어간다.
-  var headRow = function (cells, widths) {
-    var t = body.appendTable([cells]);
-    t.setBorderColor('#555555');
-    widths.forEach(function (w, c) { t.setColumnWidth(c, w); });
-    cells.forEach(function (_, c) {
-      var cell = t.getCell(0, c), label = c % 2 === 0;
-      cell.setPaddingTop(4).setPaddingBottom(4).setPaddingLeft(5).setPaddingRight(5);
-      if (label) cell.setBackgroundColor(GREEN);
-      try { cell.editAsText().setFontSize(label ? 10 : 11).setBold(label); } catch (x) {}
-    });
-    return t;
+  var pad = function (cell) { cell.setPaddingTop(6).setPaddingBottom(6).setPaddingLeft(6).setPaddingRight(6); };
+  // 문단 안에서 key 부분만 굵게
+  var bold = function (para, key) {
+    var s = para.getText(), i = s.indexOf(key);
+    if (i >= 0) para.editAsText().setBold(i, i + key.length - 1, true);
   };
-  var big = function (t) { try { t.getCell(0, 1).editAsText().setBold(true).setFontSize(13); } catch (x) {} };
 
   if (!first) body.appendPageBreak();
   // 새 문서의 첫 빈 문단은 첫 장 제목으로 쓴다
   var title = first ? body.getChild(0).asParagraph() : body.appendParagraph('');
-  title.setText('영수증 붙임 용지');
+  title.setText('<신용카드 사용 후 제출 서식>');
   title.setAlignment(DocumentApp.HorizontalAlignment.CENTER);
-  title.editAsText().setBold(true).setFontSize(18);
-  title.setSpacingAfter(8);
+  title.editAsText().setBold(false).setFontSize(20);
+  title.setSpacingAfter(14);
 
-  var h = headRow(['품의 제목', titles[r.cat] || ''], [80, W - 80]);
-  try { h.getCell(0, 1).editAsText().setBold(true); } catch (x) {}
-  headRow(['사용일', String(r.date).replace(/-/g, '. ') + '.', '기안자', drafter], [80, 181, 80, W - 341]);
-  big(headRow(['영수증 번호', 'No. ' + r.no, '항목', r.item], [80, 181, 80, W - 341]));
-  headRow(['지출처 · 내역', r.place + (r.memo ? '  (' + r.memo + ')' : '')], [80, W - 80]);
-  // 외화 금액은 그대로 남기고, 원화는 [환산]과 [여유분 포함]을 따로 적는다(실제 청구액과 견주어 볼 수 있게)
+  // 머리 줄
+  var h = body.appendTable([['', '', '']]);
+  h.setBorderColor('#000000');
+  [280, 110, W - 390].forEach(function (w, c) { h.setColumnWidth(c, w); pad(h.getCell(0, c)); });
+  var t1 = h.getCell(0, 0).getChild(0).asParagraph();
+  t1.setText('품의제목: ' + (titles[r.cat] || '')); t1.editAsText().setFontSize(11).setBold(false); bold(t1, '품의제목:');
+  var c1 = h.getCell(0, 1).getChild(0).asParagraph();
+  c1.setText('카드번호 (끝 4자리)'); c1.editAsText().setFontSize(9).setBold(true);
+  var c2 = h.getCell(0, 1).appendParagraph(r.card || ''); c2.editAsText().setFontSize(14).setBold(true);
+  var d1 = h.getCell(0, 2).getChild(0).asParagraph();
+  d1.setText('품의자: ' + drafter); d1.editAsText().setFontSize(11).setBold(false); bold(d1, '품의자:');
+
+  // 큰 칸
+  var box = body.appendTable([['']]);
+  box.setBorderColor('#000000');
+  box.setColumnWidth(0, W);
+  box.getRow(0).setMinimumHeight(640);
+  var cell = box.getCell(0, 0); pad(cell);
+  var n1 = cell.getChild(0).asParagraph();
+  n1.setText('※ 영수증에 신용카드 사용자 성명을 적고 위 칸에 붙여 제출해 주세요.');
+  n1.editAsText().setFontSize(11).setBold(false); bold(n1, '영수증에 신용카드 사용자 성명을 적고');
+  var n2 = cell.appendParagraph('※ 영수증이 여러 장일 경우 반드시 겹치지 않게 붙여주세요.');
+  n2.editAsText().setFontSize(11).setBold(false); bold(n2, '겹치지 않게 붙여주세요.');
+
+  // 장부·엑셀에서 같은 번호로 찾을 수 있게 작은 글씨 한 줄
   var foreign = r.cur !== 'KRW';
-  big(headRow(['결제 금액', amount, '적용 환율', foreign ? '1 ' + r.cur + ' = ' + r.rate + '원' : '-'], [80, 181, 80, W - 341]));
-  headRow(['원화 환산', fmt(r.krw) + '원', '여유분 포함', foreign ? fmt(r.total) + '원 (+' + fmt(r.fee) + ')' : fmt(r.total) + '원'], [80, 181, 80, W - 341]);
+  var info = cell.appendParagraph('No. ' + r.no + ' · 사용일 ' + String(r.date).replace(/-/g, '. ') + '. · ' + r.item +
+    ' · ' + r.place + (r.memo ? ' (' + r.memo + ')' : '') + ' · ' + amount +
+    (foreign ? ' (원화 환산 ' + fmt(r.krw) + '원)' : ''));
+  info.editAsText().setFontSize(9).setBold(false).setForegroundColor('#444444');
+  info.setSpacingBefore(10).setSpacingAfter(6);
+  bold(info, 'No. ' + r.no);
 
   var links = r.links || [];
   if (!links.length) {
-    var none = body.appendParagraph('(영수증 사진 없음)');
-    none.setSpacingBefore(14); none.editAsText().setFontSize(10).setBold(false);
-    return;
+    var none = cell.appendParagraph('(영수증 사진 없음)');
+    none.setAlignment(DocumentApp.HorizontalAlignment.CENTER);
+    none.editAsText().setFontSize(10).setBold(false).setForegroundColor('#000000');
   }
-  // 사진: 1장이면 크게, 여러 장이면 한 줄에 2장씩
+  // 사진: 1장이면 크게, 여러 장이면 한 줄에 2장씩(겹치지 않게)
   var one = links.length === 1, two = links.length === 2;
-  var maxW = one ? 440 : (W / 2 - 14), maxH = one ? 540 : (two ? 540 : 265);
-  var gap = body.appendParagraph(''); gap.setSpacingAfter(0); gap.editAsText().setFontSize(6);
-  for (var k = 0; k < links.length; k += 2) {
-    var pair = links.slice(k, k + 2);
-    var pt = body.appendTable([pair.map(function () { return ''; })]);
-    pt.setBorderWidth(0);
-    pair.forEach(function (link, j) {
-      var para = pt.getCell(0, j).getChild(0).asParagraph();
-      para.setAlignment(DocumentApp.HorizontalAlignment.CENTER);
-      try {
-        var id = /\/d\/([\w-]+)/.exec(link) || /[?&]id=([\w-]+)/.exec(link);
-        var img = para.appendInlineImage(DriveApp.getFileById(id[1]).getBlob());
-        var s = Math.min(maxW / img.getWidth(), maxH / img.getHeight());
-        img.setWidth(Math.round(img.getWidth() * s)).setHeight(Math.round(img.getHeight() * s));
-        stat.photos++;
-      } catch (err) {
-        para.setText('(사진을 읽지 못했습니다)'); stat.missing++;
-      }
-    });
+  var maxW = one ? 480 : 235, maxH = (one || two) ? 480 : 235;
+  var put = function (para, link) {
+    para.setAlignment(DocumentApp.HorizontalAlignment.CENTER);
+    try {
+      var id = /\/d\/([\w-]+)/.exec(link) || /[?&]id=([\w-]+)/.exec(link);
+      var img = para.appendInlineImage(DriveApp.getFileById(id[1]).getBlob());
+      var s = Math.min(maxW / img.getWidth(), maxH / img.getHeight());
+      img.setWidth(Math.round(img.getWidth() * s)).setHeight(Math.round(img.getHeight() * s));
+      stat.photos++;
+    } catch (err) {
+      para.setText('(사진을 읽지 못했습니다)'); stat.missing++;
+    }
+  };
+  if (one) put(cell.appendParagraph(''), links[0]);
+  else {
+    for (var k = 0; k < links.length; k += 2) {
+      var pair = links.slice(k, k + 2);
+      var pt = cell.appendTable([pair.map(function () { return ''; })]);
+      pt.setBorderWidth(0);
+      pair.forEach(function (link, j) { put(pt.getCell(0, j).getChild(0).asParagraph(), link); });
+    }
+  }
+  if (drafter) {
+    var nm = cell.appendParagraph('신용카드 사용자 성명: ' + drafter);
+    nm.setAlignment(DocumentApp.HorizontalAlignment.RIGHT);
+    nm.editAsText().setFontSize(10).setBold(false).setForegroundColor('#000000');
+    nm.setSpacingBefore(6);
   }
 }
 
