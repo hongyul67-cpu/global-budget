@@ -114,6 +114,13 @@ dialog .bd{padding-bottom:0}
 .gh span:last-child,.ih span:last-child{font-weight:600;font-size:12.5px;white-space:nowrap}
 .ih{margin-top:8px;padding:6px 10px;border-radius:8px;background:var(--gs);color:var(--g);font-weight:700;font-size:13.5px}
 .ih + .rec{border-top:0}.gh:first-child{margin-top:4px}
+.aud{margin-top:10px;border:1px solid var(--gl);background:var(--gs);border-radius:12px;padding:9px 12px}
+.aud .h{font-size:13px;font-weight:700;color:var(--g)}.aud .h small{font-weight:400;color:var(--sub)}
+.aud .r{display:flex;justify-content:space-between;gap:6px;margin-top:4px}
+.aud .r span{font-size:12px;color:var(--sub);display:flex;flex-direction:column}
+.aud .r b{font-size:16px;color:var(--ink)}.aud .s{font-size:12.5px;color:var(--sub);margin-top:5px}.aud .s b{color:var(--g)}
+small.a{color:var(--sub);font-weight:400}
+#segCur button{font-size:13.5px;padding:9px 2px;word-break:keep-all;line-height:1.25}
 .chips{display:flex;flex-wrap:wrap;gap:6px}
 .chips button{border:1px solid var(--line);background:#fff;border-radius:10px;padding:9px 12px;font-weight:700;font-size:14px}
 .chips button.on{background:var(--g);border-color:var(--g);color:#fff}
@@ -131,7 +138,7 @@ hr{border:0;border-top:1px solid var(--line);margin:16px 0 4px}
     <button class="gear" id="btnSet" aria-label="설정">⚙</button>
   </div>
   <div class="rate">
-    <b id="rAUD"></b><b id="rUSD"></b>
+    <b id="rAUD"></b><b id="rSGD"></b><b id="rUSD"></b>
     <button id="btnRate">환율 새로 받기</button>
     <small id="rAt"></small>
   </div>
@@ -149,6 +156,7 @@ hr{border:0;border-top:1px solid var(--line);margin:16px 0 4px}
     <div class="big"><span id="used"></span> <small>원 사용</small></div>
     <div class="bar" id="barAll"><i></i></div>
     <div class="two"><span>총 예산 <b id="total"></b></span><span>잔액 <b id="left"></b></span></div>
+    <div class="aud" id="aud"></div>
     <p class="note" id="feeNote"></p>
   </div>
 
@@ -199,6 +207,7 @@ hr{border:0;border-top:1px solid var(--line);margin:16px 0 4px}
     <label class="f">통화</label>
     <div class="seg" id="segCur">
       <button type="button" data-v="AUD">호주 달러</button>
+      <button type="button" data-v="SGD">싱가포르 달러</button>
       <button type="button" data-v="USD">미국 달러</button>
       <button type="button" data-v="KRW">원화</button>
     </div>
@@ -254,11 +263,12 @@ hr{border:0;border-top:1px solid var(--line);margin:16px 0 4px}
     <div class="g2">
       <div><label class="f" for="sAUD">호주 달러 1 = (원)</label><input class="in" id="sAUD" inputmode="decimal"></div>
       <div><label class="f" for="sUSD">미국 달러 1 = (원)</label><input class="in" id="sUSD" inputmode="decimal"></div>
+      <div><label class="f" for="sSGD">싱가포르 달러 1 = (원)</label><input class="in" id="sSGD" inputmode="decimal"></div>
     </div>
     <p class="note">자동으로 받은 값은 시장 기준 환율입니다. 실제 환전·카드 환율을 알면 여기에 직접 적으세요. 이미 저장한 지출은 저장할 때의 환율 그대로 남습니다.</p>
     <label class="f" for="sFee">카드 수수료 여유분 (%)</label>
     <input class="in" id="sFee" inputmode="decimal">
-    <p class="note">외화(호주·미국 달러)로 긁은 지출은 시장 환율로 바꾼 뒤 이 비율만큼 더해서 잡습니다. 0 을 넣으면 더하지 않습니다.</p>
+    <p class="note">외화(호주·싱가포르·미국 달러)로 긁은 지출은 시장 환율로 바꾼 뒤 이 비율만큼 더해서 잡습니다. 0 을 넣으면 더하지 않습니다.</p>
 
     <div class="foot">
       <div class="err" id="sErr"></div>
@@ -342,7 +352,7 @@ const DEF = {
     {cat: '현지 교통비', item: '교통카드 충전', budget: 423000},
     {cat: '현지 교통비', item: '추가 충전 여유분', budget: 3000},
   ],
-  rates: {AUD: 936, USD: 1341}, rateAt: 0, rateAuto: false,
+  rates: {AUD: 936, USD: 1341, SGD: 1040}, rateAt: 0, rateAuto: false,
 };
 
 // 붙임 용지 맨 위에 찍는 품의 제목 기본값(기안문 제목). 구분 이름으로 찾는다.
@@ -381,7 +391,13 @@ let F = null;   // 지금 쓰고 있는 입력 내용
 function load() {
   try {
     const j = JSON.parse(localStorage.getItem(LS));
-    if (j && j.cfg && Array.isArray(j.recs)) { j.cfg = Object.assign({}, DEF, j.cfg); undate(j); return j; }
+    if (j && j.cfg && Array.isArray(j.recs)) {
+      j.cfg = Object.assign({}, DEF, j.cfg);
+      // 싱가포르 달러가 없던 예전 기기: 자동 환율을 쓰던 중이면 바로 다시 받고, 직접 넣은 환율이면 기본값만 채운다
+      if (!(j.cfg.rates && j.cfg.rates.SGD) && j.cfg.rateAuto) j.cfg.rateAt = 0;
+      j.cfg.rates = Object.assign({}, DEF.rates, j.cfg.rates);
+      undate(j); return j;
+    }
   } catch (e) {}
   return {cfg: JSON.parse(JSON.stringify(DEF)), recs: []};
 }
@@ -472,6 +488,7 @@ function render() {
   const c = S.cfg;
   $('rAUD').textContent = `호주 달러 1 = ${Number(c.rates.AUD).toLocaleString('ko-KR')}원`;
   $('rUSD').textContent = `미국 달러 1 = ${Number(c.rates.USD).toLocaleString('ko-KR')}원`;
+  $('rSGD').textContent = `싱가포르 달러 1 = ${Number(c.rates.SGD).toLocaleString('ko-KR')}원`;
   $('rAt').textContent = c.rateAuto && c.rateAt
     ? `시장 기준 환율 · ${new Date(c.rateAt).toLocaleString('ko-KR', {month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit'})} 에 받음`
     : '직접 넣은 환율입니다 (설정에서 바꿀 수 있음)';
@@ -486,6 +503,12 @@ function render() {
   $('left').textContent = won(total - used) + '원';
   $('left').style.color = used > total ? 'var(--bad)' : '';
   setBar($('barAll'), used, total);
+  // 호주 달러로 보기: 지금 환율로 원화를 나눈 값. 남은 돈은 카드 수수료 여유분만큼 덜 쓸 수 있다.
+  const ra = Number(c.rates.AUD) || 0, A = (n) => 'A$ ' + Math.round(n / ra).toLocaleString('ko-KR');
+  const spend = (total - used) / (1 + (Number(c.feePct) || 0) / 100);
+  $('aud').innerHTML = ra ? `<div class="h">호주 달러로 보면 <small>(1 AUD = ${ra.toLocaleString('ko-KR')}원)</small></div>
+    <div class="r"><span>총 예산<b>${A(total)}</b></span><span>사용<b>${A(used)}</b></span><span>잔액<b>${A(total - used)}</b></span></div>
+    ${c.feePct > 0 && total > used ? `<div class="s">카드 수수료 ${c.feePct}% 를 빼면 호주에서 더 쓸 수 있는 돈은 약 <b>${A(spend)}</b></div>` : ''}` : '';
   $('feeNote').textContent = fee ? `카드 수수료 여유분 ${won(fee)}원이 들어 있습니다 (${c.feePct}%).` : '';
 
   const names = gs.map((g) => g.name);
@@ -520,7 +543,7 @@ function catRow(name, budget, list, sub, nItems, over) {
   const warn = over ? ` <span class="chip bad">예산 넘은 항목 ${over}개</span>` : '';
   return `<div class="cat"><div class="top"><b>${esc(name)}</b><span>${won(u)} / ${won(budget)}원</span></div>
     <div class="bar" data-u="${u}" data-b="${Number(budget) || 0}"><i></i></div>
-    <div class="two"><span>${list.length}건${warn}</span><span>잔액 <b>${won(budget - u)}원</b></span></div>${fold}</div>`;
+    <div class="two"><span>${list.length}건${warn}</span><span>잔액 <b>${won(budget - u)}원</b>${Number(S.cfg.rates.AUD) ? ` <small class="a">(A$ ${Math.round((budget - u) / S.cfg.rates.AUD).toLocaleString('ko-KR')})</small>` : ''}</span></div>${fold}</div>`;
 }
 
 function setBar(el, u, b) {
@@ -638,8 +661,9 @@ async function pushBudget() {
 async function getRate(manual) {
   try {
     const j = await (await fetch(RATE_API)).json();
-    if (j.result !== 'success' || !j.rates.KRW || !j.rates.AUD) throw 0;
-    S.cfg.rates = {USD: Math.round(j.rates.KRW * 10) / 10, AUD: Math.round(j.rates.KRW / j.rates.AUD * 10) / 10};
+    if (j.result !== 'success' || !j.rates.KRW || !j.rates.AUD || !j.rates.SGD) throw 0;
+    const won1 = (c) => Math.round(j.rates.KRW / j.rates[c] * 10) / 10;   // 그 통화 1 = 몇 원
+    S.cfg.rates = {USD: Math.round(j.rates.KRW * 10) / 10, AUD: won1('AUD'), SGD: won1('SGD')};
     S.cfg.rateAt = Date.now(); S.cfg.rateAuto = true; save(); render();
     if (manual) toast('환율을 새로 받았습니다');
   } catch (e) { if (manual) toast('환율을 받지 못했습니다. 설정에서 직접 넣을 수 있습니다.'); }
@@ -707,7 +731,7 @@ async function saveRec() {
 /* ---------- 설정 ---------- */
 function openSet() {
   const c = S.cfg;
-  $('sUrl').value = c.url; $('sAUD').value = c.rates.AUD; $('sUSD').value = c.rates.USD; $('sFee').value = c.feePct; $('sDrafter').value = attCfg().drafter;
+  $('sUrl').value = c.url; $('sAUD').value = c.rates.AUD; $('sUSD').value = c.rates.USD; $('sSGD').value = c.rates.SGD; $('sFee').value = c.feePct; $('sDrafter').value = attCfg().drafter;
   $('sCard1').value = (c.cards[0] || {}).no || ''; $('sCard2').value = (c.cards[1] || {}).no || '';
   $('sErr').textContent = ''; $('pingMsg').textContent = ''; $('pingMsg').className = 'note';
   $('bRows').innerHTML = ''; c.items.forEach((x) => addCatRow(x.cat, x.item, x.budget));
@@ -744,18 +768,18 @@ function saveSet() {
     const i = d.querySelectorAll('input');
     return {cat: i[0].value.trim(), item: i[1].value.trim(), budget: Number(i[2].value.replace(/[^\d.]/g, '')) || 0};
   }).filter((x) => x.cat || x.item);
-  const aud = Number($('sAUD').value), usd = Number($('sUSD').value), fee = Number($('sFee').value);
+  const aud = Number($('sAUD').value), usd = Number($('sUSD').value), sgd = Number($('sSGD').value), fee = Number($('sFee').value);
   const k1 = $('sCard1').value.trim(), k2 = $('sCard2').value.trim();
   if (!/^\d{4}$/.test(k1) || (k2 && !/^\d{4}$/.test(k2))) return ($('sErr').textContent = '카드 번호는 끝 4자리 숫자로 적어 주세요(보조 카드는 비워도 됩니다).');
   const u = $('sUrl').value.trim();
   if (!rows.length) return ($('sErr').textContent = '예산표에 한 줄은 있어야 합니다.');
   if (rows.some((x) => !x.cat || !x.item)) return ($('sErr').textContent = '구분과 항목 이름을 모두 적어 주세요.');
   if (new Set(rows.map((x) => x.cat + '|' + x.item)).size !== rows.length) return ($('sErr').textContent = '구분과 항목이 똑같은 줄이 있습니다.');
-  if (!(aud > 0) || !(usd > 0)) return ($('sErr').textContent = '환율은 0 보다 큰 숫자여야 합니다.');
+  if (!(aud > 0) || !(usd > 0) || !(sgd > 0)) return ($('sErr').textContent = '환율은 0 보다 큰 숫자여야 합니다.');
   if (!(fee >= 0) || fee > 20) return ($('sErr').textContent = '수수료 여유분은 0~20 사이로 넣어 주세요.');
   if (u && !goodUrl(u)) return ($('sErr').textContent = '연결 주소 모양이 다릅니다. 비워 두거나 다시 붙여 넣어 주세요.');
   const c = S.cfg;
-  if (aud !== c.rates.AUD || usd !== c.rates.USD) { c.rateAuto = false; c.rates = {AUD: aud, USD: usd}; }
+  if (aud !== c.rates.AUD || usd !== c.rates.USD || sgd !== c.rates.SGD) { c.rateAuto = false; c.rates = {AUD: aud, USD: usd, SGD: sgd}; }
   c.items = rows; c.feePct = fee; c.url = u;
   c.att = Object.assign({titles: {}}, c.att, {drafter: $('sDrafter').value.trim()});
   c.cards = [{no: k1, name: '주'}].concat(k2 ? [{no: k2, name: '보조'}] : []);
