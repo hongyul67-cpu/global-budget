@@ -125,6 +125,14 @@ header .tt{flex:1;min-width:0}
 header .ver{display:block;font-size:11px;opacity:.75;margin-top:2px}
 .rate small#rMk{width:100%;opacity:.85}
 .rec .x.ed{color:var(--g);margin-left:auto;margin-right:8px}.rec .x.ed + .x{margin-left:0}
+em.pct{font-style:normal;font-weight:700;font-size:12px;color:var(--g);background:var(--gs);border-radius:6px;padding:1px 5px;margin-left:2px}
+em.pct.near{color:var(--warn);background:var(--warns)}em.pct.over{color:var(--bad);background:var(--bads)}
+em.pct.big{font-size:14px;padding:3px 8px;vertical-align:5px}
+.cat.sub em.pct{font-size:11px}
+.trip{margin-top:8px;font-size:13px;line-height:1.55;background:rgba(255,255,255,.12);border-radius:10px;padding:6px 10px}
+.trip:empty{display:none}.trip small{opacity:.8}.trip b.hot{color:#FFD7A8}
+.tbar{display:inline-block;width:70px;height:7px;border-radius:4px;background:rgba(255,255,255,.25);vertical-align:1px;overflow:hidden}
+.tbar i{display:block;height:100%;background:#fff}
 .chips{display:flex;flex-wrap:wrap;gap:6px}
 .chips button{border:1px solid var(--line);background:#fff;border-radius:10px;padding:9px 12px;font-weight:700;font-size:14px}
 .chips button.on{background:var(--g);border-color:var(--g);color:#fff}
@@ -141,6 +149,7 @@ hr{border:0;border-top:1px solid var(--line);margin:16px 0 4px}
     <div class="tt"><h1>글로벌 현장학습 예산 장부</h1><small class="ver" id="ver"></small></div>
     <button class="gear" id="btnSet" aria-label="설정">⚙</button>
   </div>
+  <div class="trip" id="trip"></div>
   <div class="rate">
     <b id="rAUD"></b><b id="rSGD"></b><b id="rUSD"></b>
     <button id="btnRate">환율 새로 받기</button>
@@ -158,7 +167,7 @@ hr{border:0;border-top:1px solid var(--line);margin:16px 0 4px}
 
   <div class="card">
     <h2>전체 예산</h2>
-    <div class="big"><span id="used"></span> <small>원 사용</small></div>
+    <div class="big"><span id="used"></span> <small>원 사용</small> <span id="pctAll"></span></div>
     <div class="bar" id="barAll"><i></i></div>
     <div class="two"><span>총 예산 <b id="total"></b></span><span>잔액 <b id="left"></b></span></div>
     <div class="aud" id="aud"></div>
@@ -252,6 +261,11 @@ hr{border:0;border-top:1px solid var(--line);margin:16px 0 4px}
     </div>
 
     <hr>
+    <div class="g2">
+      <div><label class="f" for="sFrom">출국일</label><input class="in" type="date" id="sFrom"></div>
+      <div><label class="f" for="sTo">귀국일</label><input class="in" type="date" id="sTo"></div>
+    </div>
+    <p class="note">맨 위에 "일정 며칠째 · 남은 날"을 셉니다.</p>
     <label class="f" for="sDrafter">품의자 <small>— 붙임 용지의 품의자 · 신용카드 사용자 성명</small></label>
     <input class="in" id="sDrafter" placeholder="이름" autocomplete="off">
     <div class="g2">
@@ -343,7 +357,7 @@ hr{border:0;border-top:1px solid var(--line);margin:16px 0 4px}
 
 <script>
 const TOKEN = 'gbudget-2026';
-const APP_VER = '2026-10-17 2';   // 같은 날 두 번째 고친 판은 뒤에 숫자   // 화면을 고칠 때마다 날짜를 바꾼다(머리에 "10월 16일 수정판"으로 보임)
+const APP_VER = '2026-10-17 3';   // 같은 날 두 번째 고친 판은 뒤에 숫자   // 화면을 고칠 때마다 날짜를 바꾼다(머리에 "10월 16일 수정판"으로 보임)
 const LS = 'gbudget.v2';
 const RATE_API = 'https://open.er-api.com/v6/latest/USD';
 const DEF = {
@@ -354,6 +368,7 @@ const DEF = {
   spread: 1.2, feePct: 1.35,
   // 학교 카드(끝 4자리). 지출을 적을 때 고른다. 첫째가 기본.
   cards: [{no: '8020', name: '주'}, {no: '8012', name: '보조'}],
+  trip: {from: '2026-10-17', to: '2026-10-23'},   // 출국일·귀국일(설정에서 바꿈)
   drafter: '윤홍열',     // 품의자 = 신용카드 사용자 성명(붙임 용지에 찍힘)
   // 예산표 한 줄 = 구분(cat) · 항목(item) · 예산(원)
   items: [
@@ -526,8 +541,10 @@ function render() {
   const gs = groups();
   const total = gs.reduce((a, g) => a + g.budget, 0);
   const used = recs.reduce((a, r) => a + r.total, 0);
+  $('trip').innerHTML = tripLine(c.trip, used, total);
   const fee = recs.reduce((a, r) => a + r.fee, 0);
   $('used').textContent = won(used);
+  $('pctAll').innerHTML = total > 0 ? `<em class="pct big${used > total ? ' over' : ''}">예산의 ${pctTag(used, total).replace(/<[^>]+>/g, '')}</em>` : '';
   $('total').textContent = won(total) + '원';
   $('left').textContent = won(total - used) + '원';
   $('left').style.color = used > total ? 'var(--bad)' : '';
@@ -563,14 +580,34 @@ function render() {
   renderSync();
 }
 
+// 예산 대비 사용 비율(%) 글씨. 10% 아래는 소수 첫째 자리까지.
+function pctTag(u, b) {
+  if (!(b > 0)) return '';
+  const p = u / b * 100, t = p > 0 && p < 10 ? p.toFixed(1) : Math.round(p);
+  return `<em class="pct${p > 100 ? ' over' : p > 85 ? ' near' : ''}">${t}%</em>`;
+}
+// 일정 한 줄: "일정 3/7일째 · 남은 날 4일 · 일정 43% 지남 · 예산 24% 사용"
+function tripLine(t, used, total) {
+  if (!t || !t.from || !t.to || t.to < t.from) return '';
+  const day = (s) => Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10)) / 864e5;
+  const n = day(t.to) - day(t.from) + 1, k = day(today()) - day(t.from) + 1;
+  const md = (s) => `${+s.slice(5, 7)}/${+s.slice(8, 10)}`, span = `${md(t.from)}~${md(t.to)} · ${n}일`;
+  const bp = total > 0 ? Math.round(used / total * 100) : 0;
+  if (k < 1) return `📅 출국까지 <b>${1 - k}일</b> <small>(${span})</small>`;
+  if (k > n) return `📅 일정 끝 <small>(${span})</small> · 예산 <b>${bp}%</b> 사용`;
+  const tp = Math.round(k / n * 100);
+  return `📅 일정 <b>${k}/${n}일째</b> · 남은 날 <b>${n - k}일</b> <small>(${span})</small><br>` +
+    `<span class="tbar"><i style="width:${tp}%"></i></span> 일정 ${tp}% 지남 · 예산 <b class="${bp > tp + 10 ? 'hot' : ''}">${bp}%</b> 사용`;
+}
+
 function catRow(name, budget, list, sub, nItems, over) {
   const u = list.reduce((a, r) => a + r.total, 0);
-  if (sub) return `<div class="cat sub"><div class="top"><span class="nm">${esc(name)}</span><span>${won(u)} / ${won(budget)}원</span></div>
+  if (sub) return `<div class="cat sub"><div class="top"><span class="nm">${esc(name)}</span><span>${won(u)} / ${won(budget)}원 ${pctTag(u, budget)}</span></div>
     <div class="bar" data-u="${u}" data-b="${Number(budget) || 0}"><i></i></div>
     <div class="two"><span>${list.length}건</span><span>잔액 ${won(budget - u)}원</span></div></div>`;
   const fold = nItems ? `<span class="arr">항목 ${nItems}개</span>` : '';
   const warn = over ? ` <span class="chip bad">예산 넘은 항목 ${over}개</span>` : '';
-  return `<div class="cat"><div class="top"><b>${esc(name)}</b><span>${won(u)} / ${won(budget)}원</span></div>
+  return `<div class="cat"><div class="top"><b>${esc(name)}</b><span>${won(u)} / ${won(budget)}원 ${pctTag(u, budget)}</span></div>
     <div class="bar" data-u="${u}" data-b="${Number(budget) || 0}"><i></i></div>
     <div class="two"><span>${list.length}건${warn}</span><span>잔액 <b>${won(budget - u)}원</b>${cardRate('AUD') ? ` <small class="a">(A$ ${Math.round((budget - u) / cardRate('AUD')).toLocaleString('ko-KR')})</small>` : ''}</span></div>${fold}</div>`;
 }
@@ -594,19 +631,19 @@ function renderList() {
   }
   if (!grouped) { $('list').innerHTML = list.map(recRow).join(''); return; }
   // 예산표 순서대로 구분 › 항목 제목을 달고, 그 아래에 그 항목의 지출을 번호 순으로 모은다
-  const head = (cls, name, l) => { const v = l.filter((r) => !r.del);
-    return `<div class="${cls}"><span>${esc(name)}</span><span>${v.length}건 · ${won(v.reduce((a, r) => a + r.total, 0))}원</span></div>`; };
+  const head = (cls, name, l, budget) => { const v = l.filter((r) => !r.del), u = v.reduce((a, r) => a + r.total, 0);
+    return `<div class="${cls}"><span>${esc(name)}</span><span>${v.length}건 · ${won(u)}원${budget ? ' · 예산의 ' + pctTag(u, budget).replace(/<[^>]+>/g, '') : ''}</span></div>`; };
   const byNo = (a, b) => (a.no || 0) - (b.no || 0), seen = new Set();
   let html = '';
   for (const g of groups()) {
     const gl = list.filter((r) => r.cat === g.name && g.items.some((x) => x.item === r.item));
     if (!gl.length) continue;
-    html += head('gh', g.name, gl);
+    html += head('gh', g.name, gl, g.budget);
     for (const x of g.items) {
       const il = gl.filter((r) => r.item === x.item).sort(byNo);
       if (!il.length) continue;
       il.forEach((r) => seen.add(r.id));
-      html += head('ih', x.item, il) + il.map(recRow).join('');
+      html += head('ih', x.item, il, Number(x.budget) || 0) + il.map(recRow).join('');
     }
   }
   const rest = list.filter((r) => !seen.has(r.id)).sort(byNo);
@@ -796,6 +833,7 @@ async function saveRec() {
 function openSet() {
   const c = S.cfg;
   $('sUrl').value = c.url; $('sAUD').value = c.rates.AUD; $('sUSD').value = c.rates.USD; $('sSGD').value = c.rates.SGD; $('sFee').value = c.feePct; $('sSpread').value = c.spread; nhPrev(); $('sDrafter').value = attCfg().drafter;
+  $('sFrom').value = (c.trip || {}).from || ''; $('sTo').value = (c.trip || {}).to || '';
   $('sCard1').value = (c.cards[0] || {}).no || ''; $('sCard2').value = (c.cards[1] || {}).no || '';
   $('sErr').textContent = ''; $('pingMsg').textContent = ''; $('pingMsg').className = 'note';
   $('bRows').innerHTML = ''; c.items.forEach((x) => addCatRow(x.cat, x.item, x.budget));
@@ -834,6 +872,8 @@ function saveSet() {
   }).filter((x) => x.cat || x.item);
   const aud = Number($('sAUD').value), usd = Number($('sUSD').value), sgd = Number($('sSGD').value), fee = Number($('sFee').value), spread = Number($('sSpread').value);
   const k1 = $('sCard1').value.trim(), k2 = $('sCard2').value.trim();
+  const tf = $('sFrom').value, tt = $('sTo').value;
+  if (tf && tt && tt < tf) return ($('sErr').textContent = '귀국일이 출국일보다 앞입니다.');
   if (!/^\d{4}$/.test(k1) || (k2 && !/^\d{4}$/.test(k2))) return ($('sErr').textContent = '카드 번호는 끝 4자리 숫자로 적어 주세요(보조 카드는 비워도 됩니다).');
   const u = $('sUrl').value.trim();
   if (!rows.length) return ($('sErr').textContent = '예산표에 한 줄은 있어야 합니다.');
@@ -845,7 +885,7 @@ function saveSet() {
   if (u && !goodUrl(u)) return ($('sErr').textContent = '연결 주소 모양이 다릅니다. 비워 두거나 다시 붙여 넣어 주세요.');
   const c = S.cfg;
   if (aud !== c.rates.AUD || usd !== c.rates.USD || sgd !== c.rates.SGD) { c.rateAuto = false; c.rates = {AUD: aud, USD: usd, SGD: sgd}; }
-  c.items = rows; c.feePct = fee; c.spread = spread; c.url = u;
+  c.items = rows; c.feePct = fee; c.spread = spread; c.url = u; c.trip = {from: tf, to: tt};
   c.att = Object.assign({titles: {}}, c.att, {drafter: $('sDrafter').value.trim()});
   c.cards = [{no: k1, name: '주'}].concat(k2 ? [{no: k2, name: '보조'}] : []);
   save(); $('dlgSet').close(); render(); toast('설정을 저장했습니다');
