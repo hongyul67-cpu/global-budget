@@ -13,10 +13,10 @@
  * [처음 배포]  script.google.com → 새 프로젝트 → 이 코드 붙여넣기 → 저장
  *   → 배포 → 새 배포 → 웹 앱 / 실행: 나 / 액세스: 모든 사용자 → 나온 URL 을 앱 ⚙ 설정에 붙여넣기
  * [코드 고친 뒤]  배포 → 배포 관리 → (기존 배포) 연필 → 버전 "새 버전" → 배포  (URL 유지)
- * [확인]  URL 을 브라우저로 열어 build 값이 "budget-v8" 이면 이 버전이 라이브
+ * [확인]  URL 을 브라우저로 열어 build 값이 "budget-v9" 이면 이 버전이 라이브
  */
 const TOKEN = 'gbudget-2026';
-const BUILD = 'budget-v8';
+const BUILD = 'budget-v9';
 const RECEIPT_FOLDER = '글로벌 현장학습 영수증';
 const ATTACH_FOLDER = '붙임 용지';
 const BOOK_NAME = '글로벌 현장학습 지출 장부';
@@ -218,6 +218,18 @@ function attachSave_(doc, name) {
 //   큰 칸: 안내 2줄 + (장부에서 찾을 수 있게) 번호·사용일·금액 한 줄 + 영수증 사진 + 카드 사용자 성명
 // first = 문서의 첫 장인지, stat = {photos, missing} 세는 곳
 function attachPage_(body, r, titles, drafter, first, stat) {
+  // 영수증 사진은 한 장에 2장까지(길쭉한 카드 전표도 글자가 읽히는 크기). 3장 이상이면 같은 서식을 다음 장에 되풀이한다.
+  var links = r.links || [], groups = [];
+  for (var g = 0; g < links.length; g += 2) groups.push(links.slice(g, g + 2));
+  if (!groups.length) groups.push([]);
+  groups.forEach(function (pair, gi) {
+    var note = groups.length > 1 ? ' · 사진 ' + (gi * 2 + 1) + (pair.length > 1 ? '~' + (gi * 2 + 2) : '') + ' / ' + links.length + '장 (' + (gi + 1) + '/' + groups.length + '쪽)' : '';
+    attachSheet_(body, r, titles, drafter, first && gi === 0, stat, pair, note);
+  });
+}
+
+// 서식 한 장: pair = 이 장에 붙일 사진(0~2장), note = 여러 장으로 나뉠 때 붙는 "사진 1~2 / 5장 (1/3쪽)"
+function attachSheet_(body, r, titles, drafter, first, stat, pair, note) {
   var W = 523;                                   // A4(595pt)에서 좌우 여백 36pt 를 뺀 너비
   var fmt = function (n) { return String(Math.round(Number(n) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, ','); };
   var amount = r.cur === 'KRW' ? fmt(r.amt) + '원' : Number(r.amt).toFixed(2) + ' ' + r.cur;
@@ -239,7 +251,7 @@ function attachPage_(body, r, titles, drafter, first, stat) {
   // 머리 줄
   var h = body.appendTable([['', '', '']]);
   h.setBorderColor('#000000');
-  [280, 110, W - 390].forEach(function (w, c) { h.setColumnWidth(c, w); pad(h.getCell(0, c)); });
+  [300, 118, W - 418].forEach(function (w, c) { h.setColumnWidth(c, w); pad(h.getCell(0, c)); });
   var t1 = h.getCell(0, 0).getChild(0).asParagraph();
   t1.setText('품의제목: ' + (titles[r.cat] || '')); t1.editAsText().setFontSize(11).setBold(false); bold(t1, '품의제목:');
   var c1 = h.getCell(0, 1).getChild(0).asParagraph();
@@ -252,7 +264,7 @@ function attachPage_(body, r, titles, drafter, first, stat) {
   var box = body.appendTable([['']]);
   box.setBorderColor('#000000');
   box.setColumnWidth(0, W);
-  box.getRow(0).setMinimumHeight(640);
+  box.getRow(0).setMinimumHeight(600);
   var cell = box.getCell(0, 0); pad(cell);
   var n1 = cell.getChild(0).asParagraph();
   n1.setText('※ 영수증에 신용카드 사용자 성명을 적고 위 칸에 붙여 제출해 주세요.');
@@ -264,20 +276,18 @@ function attachPage_(body, r, titles, drafter, first, stat) {
   var foreign = r.cur !== 'KRW';
   var info = cell.appendParagraph('No. ' + r.no + ' · 사용일 ' + String(r.date).replace(/-/g, '. ') + '. · ' + r.item +
     ' · ' + r.place + (r.memo ? ' (' + r.memo + ')' : '') + ' · ' + amount +
-    (foreign ? ' (원화 환산 ' + fmt(r.krw) + '원)' : ''));
+    (foreign ? ' (원화 환산 ' + fmt(r.krw) + '원)' : '') + note);
   info.editAsText().setFontSize(9).setBold(false).setForegroundColor('#444444');
   info.setSpacingBefore(10).setSpacingAfter(6);
   bold(info, 'No. ' + r.no);
 
-  var links = r.links || [];
-  if (!links.length) {
+  if (!pair.length) {
     var none = cell.appendParagraph('(영수증 사진 없음)');
     none.setAlignment(DocumentApp.HorizontalAlignment.CENTER);
     none.editAsText().setFontSize(10).setBold(false).setForegroundColor('#000000');
   }
-  // 사진: 1장이면 크게, 여러 장이면 한 줄에 2장씩(겹치지 않게)
-  var one = links.length === 1, two = links.length === 2;
-  var maxW = one ? 480 : 235, maxH = (one || two) ? 480 : 235;
+  // 1장이면 크게, 2장이면 나란히(겹치지 않게). 높이 500pt 안으로.
+  var maxW = pair.length === 1 ? 480 : 235, maxH = 500;
   var put = function (para, link) {
     para.setAlignment(DocumentApp.HorizontalAlignment.CENTER);
     try {
@@ -290,15 +300,13 @@ function attachPage_(body, r, titles, drafter, first, stat) {
       para.setText('(사진을 읽지 못했습니다)'); stat.missing++;
     }
   };
-  if (one) put(cell.appendParagraph(''), links[0]);
-  else {
-    for (var k = 0; k < links.length; k += 2) {
-      var pair = links.slice(k, k + 2);
-      var pt = cell.appendTable([pair.map(function () { return ''; })]);
-      pt.setBorderWidth(0);
-      pair.forEach(function (link, j) { put(pt.getCell(0, j).getChild(0).asParagraph(), link); });
-    }
+  if (pair.length === 1) put(cell.appendParagraph(''), pair[0]);
+  else if (pair.length === 2) {
+    var pt = cell.appendTable([['', '']]);
+    pt.setBorderWidth(0);
+    pair.forEach(function (link, j) { put(pt.getCell(0, j).getChild(0).asParagraph(), link); });
   }
+  stat.pages = (stat.pages || 0) + 1;
   if (drafter) {
     var nm = cell.appendParagraph('신용카드 사용자 성명: ' + drafter);
     nm.setAlignment(DocumentApp.HorizontalAlignment.RIGHT);
@@ -332,7 +340,7 @@ function attach_(data) {
   var doc = attachDoc_(name), stat = { photos: 0, missing: 0 };
   recs.forEach(function (r, i) { attachPage_(doc.getBody(), r, data.titles || {}, String(data.drafter || ''), i === 0, stat); });
   var pdf = attachSave_(doc, name);
-  return { ok: true, url: pdf.getUrl(), name: pdf.getName(), pages: recs.length, count: recs.length, photos: stat.photos, missing: stat.missing };
+  return { ok: true, url: pdf.getUrl(), name: pdf.getName(), pages: stat.pages, count: recs.length, photos: stat.photos, missing: stat.missing };
 }
 
 function book_() {

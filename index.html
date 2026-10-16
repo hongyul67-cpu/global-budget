@@ -302,7 +302,7 @@ hr{border:0;border-top:1px solid var(--line);margin:16px 0 4px}
 <dialog id="dlgAtt">
   <div class="hd"><h3>영수증 붙임 용지 만들기</h3><button data-close aria-label="닫기">×</button></div>
   <div class="bd">
-    <p style="margin:0 0 4px">붙임 용지(학교 「신용카드 사용 후 제출 서식」)는 <b>지출을 저장할 때마다 한 장씩 자동으로</b> 드라이브 「붙임 용지」 폴더에 생깁니다. 여기서는 고른 기간의 것을 <b>PDF 한 개로 묶어</b> 한꺼번에 인쇄할 수 있게 만듭니다.</p>
+    <p style="margin:0 0 4px">붙임 용지(학교 「신용카드 사용 후 제출 서식」)는 <b>지출을 저장할 때마다 한 장씩 자동으로</b> 드라이브 「붙임 용지」 폴더에 생깁니다. 여기서는 고른 기간의 것을 <b>PDF 한 개로 묶어</b> 한꺼번에 인쇄할 수 있게 만듭니다. 한 장에는 영수증 사진이 2장까지 들어가고, 더 많으면 같은 서식이 다음 장에 이어집니다.</p>
     <div class="g2">
       <div><label class="f" for="tFrom">시작일</label><input class="in" type="date" id="tFrom"></div>
       <div><label class="f" for="tTo">종료일</label><input class="in" type="date" id="tTo"></div>
@@ -343,7 +343,7 @@ hr{border:0;border-top:1px solid var(--line);margin:16px 0 4px}
 
 <script>
 const TOKEN = 'gbudget-2026';
-const APP_VER = '2026-10-17';   // 화면을 고칠 때마다 날짜를 바꾼다(머리에 "10월 16일 수정판"으로 보임)
+const APP_VER = '2026-10-17 2';   // 같은 날 두 번째 고친 판은 뒤에 숫자   // 화면을 고칠 때마다 날짜를 바꾼다(머리에 "10월 16일 수정판"으로 보임)
 const LS = 'gbudget.v2';
 const RATE_API = 'https://open.er-api.com/v6/latest/USD';
 const DEF = {
@@ -516,8 +516,8 @@ function render() {
   $('rUSD').textContent = `미국 달러 1 ≈ ${kr(cardRate('USD'))}원`;
   $('rSGD').textContent = `싱가포르 달러 1 ≈ ${kr(cardRate('SGD'))}원`;
   $('rMk').textContent = `카드(농협 비자) 예상 = 시장 환율 + ${kr(c.spread)}% (시장: 호주 ${kr(c.rates.AUD)} · 싱가포르 ${kr(c.rates.SGD)} · 미국 ${kr(c.rates.USD)}원)`;
-  const vd = APP_VER.split('-');
-  $('ver').textContent = `${+vd[1]}월 ${+vd[2]}일 수정판` + (c.build ? ` · 구글 코드 ${c.build}` : '');
+  const [vday, vn] = APP_VER.split(' '), vd = vday.split('-');
+  $('ver').textContent = `${+vd[1]}월 ${+vd[2]}일 수정판${vn ? ' ' + vn : ''}` + (c.build ? ` · 구글 코드 ${c.build}` : '');
   $('rAt').textContent = c.rateAuto && c.rateAt
     ? `시장 기준 환율 · ${new Date(c.rateAt).toLocaleString('ko-KR', {month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit'})} 에 받음`
     : '직접 넣은 환율입니다 (설정에서 바꿀 수 있음)';
@@ -583,13 +583,13 @@ function setBar(el, u, b) {
 
 function renderList() {
   const q = $('q').value.trim().toLowerCase(), fc = $('fcat').value;
-  const list = S.recs.filter((r) => (!fc || r.cat === fc) && (!q || ('no.' + r.no + ' ' + r.place + ' ' + (r.item || '') + ' ' + (r.memo || '')).toLowerCase().includes(q)))
+  const list = S.recs.filter((r) => !r.del && (!fc || r.cat === fc) && (!q || ('no.' + r.no + ' ' + r.place + ' ' + (r.item || '') + ' ' + (r.memo || '')).toLowerCase().includes(q)))
     .sort((a, b) => (b.date + b.ts).localeCompare(a.date + a.ts));
   const grouped = S.cfg.view !== 'new';
   $('btnView').textContent = grouped ? '최신순으로 보기' : '항목별로 묶어 보기';
   $('cnt').textContent = `${live().length}건`;
   if (!list.length) {
-    $('list').innerHTML = `<div class="empty">${S.recs.length ? '찾는 지출이 없습니다.' : '아직 기록이 없습니다.<br>아래 초록 단추로 첫 영수증을 찍어 보세요.'}</div>`;
+    $('list').innerHTML = `<div class="empty">${live().length ? '찾는 지출이 없습니다.' : '아직 기록이 없습니다.<br>아래 초록 단추로 첫 영수증을 찍어 보세요.'}</div>`;
     return;
   }
   if (!grouped) { $('list').innerHTML = list.map(recRow).join(''); return; }
@@ -948,7 +948,8 @@ function attCfg() {
 function attInfo() {
   const a = $('tFrom').value, b = $('tTo').value;
   const l = live().filter((r) => (!a || r.date >= a) && (!b || r.date <= b));
-  const pages = l.length, ph = l.reduce((n, r) => n + (r.links || []).length, 0);
+  const nph = (r) => Math.max((r.links || []).length, r.sent ? 0 : r.nPhoto || 0);
+  const pages = l.reduce((n, r) => n + Math.max(1, Math.ceil(nph(r) / 2)), 0), ph = l.reduce((n, r) => n + (r.links || []).length, 0);
   const wait = l.filter((r) => r.sync !== 'done').length;
   $('tInfo').className = 'note' + (wait ? ' warn' : '');
   $('tInfo').textContent = l.length
