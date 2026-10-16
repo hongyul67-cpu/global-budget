@@ -124,7 +124,7 @@ small.a{color:var(--sub);font-weight:400}
 header .tt{flex:1;min-width:0}
 header .ver{display:block;font-size:11px;opacity:.75;margin-top:2px}
 .rate small#rMk{width:100%;opacity:.85}
-.rec .x.ed{color:var(--g);margin-left:auto;margin-right:8px}.rec .x.ed + .x{margin-left:0}
+.rec .acts{margin-left:auto;display:flex;gap:4px;white-space:nowrap}.rec .acts .x{margin-left:0;padding:4px 6px}.rec .x.ed{color:var(--g)}
 em.pct{font-style:normal;font-weight:700;font-size:12px;color:var(--g);background:var(--gs);border-radius:6px;padding:1px 5px;margin-left:2px}
 em.pct.near{color:var(--warn);background:var(--warns)}em.pct.over{color:var(--bad);background:var(--bads)}
 em.pct.big{font-size:14px;padding:3px 8px;vertical-align:5px}
@@ -357,7 +357,7 @@ hr{border:0;border-top:1px solid var(--line);margin:16px 0 4px}
 
 <script>
 const TOKEN = 'gbudget-2026';
-const APP_VER = '2026-10-17 4';   // 같은 날 두 번째 고친 판은 뒤에 숫자   // 화면을 고칠 때마다 날짜를 바꾼다(머리에 "10월 16일 수정판"으로 보임)
+const APP_VER = '2026-10-17 5';   // 같은 날 두 번째 고친 판은 뒤에 숫자   // 화면을 고칠 때마다 날짜를 바꾼다(머리에 "10월 16일 수정판"으로 보임)
 const LS = 'gbudget.v2';
 const RATE_API = 'https://open.er-api.com/v6/latest/USD';
 const DEF = {
@@ -665,7 +665,7 @@ function recRow(r) {
       <div class="l2"><span>${esc(r.date)} · ${esc(r.item || r.cat)}${r.card ? ' · 카드 ' + esc(r.card) : ''}</span><span>${sub}</span></div>
       ${r.memo ? `<div class="l2"><span>${esc(r.memo)}</span></div>` : ''}
       <div class="l3">${r.del ? '<span class="chip gray">취소됨</span>' : st} ${links}${r.pdf ? ` <a href="${esc(r.pdf)}" target="_blank" rel="noopener">붙임 용지</a>` : ''}
-        ${r.del ? '' : `<button class="x ed" data-edit="${esc(r.id)}">수정</button><button class="x" data-del="${esc(r.id)}">지출 취소</button>`}</div></div>`;
+        ${r.del ? '' : `<span class="acts"><button class="x ed" data-edit="${esc(r.id)}">수정</button><button class="x" data-del="${esc(r.id)}">지출 취소</button></span>`}</div></div>`;
 }
 
 function renderSync() {
