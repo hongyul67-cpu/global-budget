@@ -357,7 +357,7 @@ hr{border:0;border-top:1px solid var(--line);margin:16px 0 4px}
 
 <script>
 const TOKEN = 'gbudget-2026';
-const APP_VER = '2026-10-17 6';   // 화면을 고칠 때마다 날짜를 바꾼다(머리에 "10월 17일 수정판 6"). 같은 날 또 고치면 뒤 숫자
+const APP_VER = '2026-10-17 7';   // 화면을 고칠 때마다 날짜를 바꾼다(머리에 "10월 17일 수정판 6"). 같은 날 또 고치면 뒤 숫자
 const LATEST_BUILD = 9;           // apps-script.gs 의 최신 BUILD 번호(budget-v9). 구글 코드를 고치면 같이 올린다.
 const buildNo = (b) => +(String(b || '').match(/budget-v(\d+)/) || [0, 0])[1];
 const LS = 'gbudget.v2';
@@ -1092,18 +1092,31 @@ $('btnLink').onclick = async () => {
 document.querySelectorAll('[data-close]').forEach((b) => (b.onclick = () => b.closest('dialog').close()));
 window.addEventListener('online', syncAll);
 
-// 「폰으로 옮길 링크」로 들어왔으면 연결 주소를 받아 적고 주소창에서는 지운다
-(function fromLink() {
-  const m = /[#&]u=([^&]+)/.exec(location.hash); if (!m) return;
+// 「폰으로 옮길 링크」(#u=주소)로 들어왔으면 연결 주소를 받아 적고 주소창에서는 지운다.
+// 장부가 이미 열려 있는 탭에서 링크를 누르면 페이지가 다시 열리지 않으므로 hashchange 에서도 받는다.
+function fromLink() {
+  const m = /[#&]u=([^&]+)/.exec(location.hash); if (!m) return false;
   const u = decodeURIComponent(m[1]);
   history.replaceState(null, '', location.pathname);
-  if (goodUrl(u) && u !== S.cfg.url) { S.cfg.url = u; save(); setTimeout(() => toast('드라이브 연결 주소를 받았습니다'), 300); }
-})();
+  if (!goodUrl(u) || u === S.cfg.url) return false;
+  S.cfg.url = u; S.cfg.build = ''; lastErr = ''; save(); render();
+  setTimeout(() => toast('드라이브 연결 주소를 받았습니다'), 300);
+  return true;
+}
+fromLink();
+window.addEventListener('hashchange', () => { if (fromLink()) checkBuild(); });
 
 if (renamed) { save(); pushBudget(); }   // 바뀐 항목 이름으로 시트 [요약]도 다시 쓴다
 render();
 if (!S.cfg.rateAt || Date.now() - S.cfg.rateAt > 6 * 3600 * 1000) { if (S.cfg.rateAuto || !S.cfg.rateAt) getRate(false); }
-syncAll();
+// 열 때마다 연결된 구글 코드 버전을 다시 확인한다(주소를 바꿨는데 옛 버전 표시가 남지 않게). 끝나면 올리기.
+async function checkBuild() {
+  if (S.cfg.url) {
+    try { const j = await post({action: 'ping'}); S.cfg.build = j.build || ''; if (j.book) S.cfg.book = j.book; if (j.folder) S.cfg.folder = j.folder; save(); render(); } catch (e) {}
+  }
+  syncAll();
+}
+checkBuild();
 </script>
 </body>
 </html>
