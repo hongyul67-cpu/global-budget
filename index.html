@@ -357,7 +357,7 @@ hr{border:0;border-top:1px solid var(--line);margin:16px 0 4px}
 
 <script>
 const TOKEN = 'gbudget-2026';
-const APP_VER = '2026-10-17 3';   // 같은 날 두 번째 고친 판은 뒤에 숫자   // 화면을 고칠 때마다 날짜를 바꾼다(머리에 "10월 16일 수정판"으로 보임)
+const APP_VER = '2026-10-17 4';   // 같은 날 두 번째 고친 판은 뒤에 숫자   // 화면을 고칠 때마다 날짜를 바꾼다(머리에 "10월 16일 수정판"으로 보임)
 const LS = 'gbudget.v2';
 const RATE_API = 'https://open.er-api.com/v6/latest/USD';
 const DEF = {
@@ -368,7 +368,7 @@ const DEF = {
   spread: 1.2, feePct: 1.35,
   // 학교 카드(끝 4자리). 지출을 적을 때 고른다. 첫째가 기본.
   cards: [{no: '8020', name: '주'}, {no: '8012', name: '보조'}],
-  trip: {from: '2026-10-17', to: '2026-10-23'},   // 출국일·귀국일(설정에서 바꿈)
+  trip: {from: '2026-10-16', to: '2026-10-24'},   // 출국일·귀국일(설정에서 바꿈)
   drafter: '윤홍열',     // 품의자 = 신용카드 사용자 성명(붙임 용지에 찍힘)
   // 예산표 한 줄 = 구분(cat) · 항목(item) · 예산(원)
   items: [
@@ -427,6 +427,8 @@ function load() {
     if (j && j.cfg && Array.isArray(j.recs)) {
       // 카드 환율 가산이 없던 예전 기기: 그때 기본값이던 수수료 2% 는 농협 비자 기준 1.35% 로 바꾼다
       if (!('spread' in j.cfg) && (j.cfg.feePct === 2 || j.cfg.feePct == null)) j.cfg.feePct = 1.35;
+      // 처음에 어림으로 넣었던 일정(10/17~10/23)은 실제 일정(10/16 출국 · 10/24 귀국)으로 바꾼다
+      if (j.cfg.trip && j.cfg.trip.from === '2026-10-17' && j.cfg.trip.to === '2026-10-23') delete j.cfg.trip;
       j.cfg = Object.assign({}, DEF, j.cfg);
       // 싱가포르 달러가 없던 예전 기기: 자동 환율을 쓰던 중이면 바로 다시 받고, 직접 넣은 환율이면 기본값만 채운다
       if (!(j.cfg.rates && j.cfg.rates.SGD) && j.cfg.rateAuto) j.cfg.rateAt = 0;
