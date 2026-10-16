@@ -124,6 +124,7 @@ small.a{color:var(--sub);font-weight:400}
 header .tt{flex:1;min-width:0}
 header .ver{display:block;font-size:11px;opacity:.75;margin-top:2px}
 .rate small#rMk{width:100%;opacity:.85}
+.rec .x.ed{color:var(--g);margin-left:auto;margin-right:8px}.rec .x.ed + .x{margin-left:0}
 .chips{display:flex;flex-wrap:wrap;gap:6px}
 .chips button{border:1px solid var(--line);background:#fff;border-radius:10px;padding:9px 12px;font-weight:700;font-size:14px}
 .chips button.on{background:var(--g);border-color:var(--g);color:#fff}
@@ -186,7 +187,7 @@ hr{border:0;border-top:1px solid var(--line);margin:16px 0 4px}
 
 <!-- 지출 입력 -->
 <dialog id="dlgAdd">
-  <div class="hd"><h3>지출 기록</h3><button data-close aria-label="닫기">×</button></div>
+  <div class="hd"><h3 id="addTitle">지출 기록</h3><button data-close aria-label="닫기">×</button></div>
   <div class="bd">
     <label class="f">영수증 사진 <small>— 저장하면 구글 드라이브로 올라갑니다</small></label>
     <div class="seg">
@@ -196,6 +197,7 @@ hr{border:0;border-top:1px solid var(--line);margin:16px 0 4px}
     <input type="file" id="fCam" accept="image/*" capture="environment" hidden>
     <input type="file" id="fAlbum" accept="image/*" multiple hidden>
     <div class="shots" id="shots"></div>
+    <p class="note" id="oldShots"></p>
 
     <label class="f">구분</label>
     <div class="chips" id="segCat"></div>
@@ -341,7 +343,7 @@ hr{border:0;border-top:1px solid var(--line);margin:16px 0 4px}
 
 <script>
 const TOKEN = 'gbudget-2026';
-const APP_VER = '2026-10-16';   // 화면을 고칠 때마다 날짜를 바꾼다(머리에 "10월 16일 수정판"으로 보임)
+const APP_VER = '2026-10-17';   // 화면을 고칠 때마다 날짜를 바꾼다(머리에 "10월 16일 수정판"으로 보임)
 const LS = 'gbudget.v2';
 const RATE_API = 'https://open.er-api.com/v6/latest/USD';
 const DEF = {
@@ -480,8 +482,8 @@ function cardRate(cur) {
   const m = Number(S.cfg.rates[cur]) || 0;
   return Math.round(m * (1 + (Number(S.cfg.spread) || 0) / 100) * 10) / 10;
 }
-function money(cur, amt) {
-  const rate = cur === 'KRW' ? 1 : cardRate(cur);
+function money(cur, amt, keep) {
+  const rate = cur === 'KRW' ? 1 : (keep || cardRate(cur));
   const krw = Math.round(amt * rate);
   // 결제는 모두 카드. 해외 결제 수수료는 외화로 긁을 때만 붙으므로 원화 지출에는 더하지 않는다.
   const fee = cur !== 'KRW' ? Math.round(krw * (Number(S.cfg.feePct) || 0) / 100) : 0;
@@ -618,13 +620,13 @@ function recRow(r) {
     const links = (r.links || []).map((u, i) => `<a href="${esc(u)}" target="_blank" rel="noopener">영수증 ${i + 1}</a>`).join(' ');
     const st = r.sync === 'done'
       ? (r.sent ? '<span class="chip">드라이브 저장됨</span>' : '<span class="chip gray">이 기기에만 있음</span>')
-      : `<span class="chip wait">올리기 대기${r.nPhoto ? ' · 사진 ' + r.nPhoto + '장' : ''}</span>`;
+      : `<span class="chip wait">${r.dirty ? '고친 내용 ' : ''}올리기 대기${r.nPhoto ? ' · 사진 ' + r.nPhoto + '장' : ''}</span>`;
     return `<div class="rec${r.del ? ' del' : ''}">
       <div class="l1"><span><i class="no">No. ${esc(r.no)}</i>${esc(r.place)}</span><span>${amt}</span></div>
       <div class="l2"><span>${esc(r.date)} · ${esc(r.item || r.cat)}${r.card ? ' · 카드 ' + esc(r.card) : ''}</span><span>${sub}</span></div>
       ${r.memo ? `<div class="l2"><span>${esc(r.memo)}</span></div>` : ''}
       <div class="l3">${r.del ? '<span class="chip gray">취소됨</span>' : st} ${links}${r.pdf ? ` <a href="${esc(r.pdf)}" target="_blank" rel="noopener">붙임 용지</a>` : ''}
-        ${r.del ? '' : `<button class="x" data-del="${esc(r.id)}">지출 취소</button>`}</div></div>`;
+        ${r.del ? '' : `<button class="x ed" data-edit="${esc(r.id)}">수정</button><button class="x" data-del="${esc(r.id)}">지출 취소</button>`}</div></div>`;
 }
 
 function renderSync() {
@@ -664,16 +666,17 @@ async function syncAll() {
       else {
         const ph = await photos.get(r.id);
         const att = attCfg();
-        const j = await post({action: 'add', photos: ph.map((d) => d.split(',')[1]), titles: att.titles, drafter: att.drafter,
+        const j = await post({action: r.sent && r.dirty ? 'update' : 'add', photos: ph.map((d) => d.split(',')[1]), titles: att.titles, drafter: att.drafter,
           rec: {id: r.id, date: r.date, place: r.place, cat: r.cat, item: r.item, cur: r.cur, amt: r.amt, expr: r.expr,
                 rate: r.rate, krw: r.krw, fee: r.fee, total: r.total, memo: r.memo, no: r.no, card: r.card || ''}});
-        r.links = j.links || []; r.pdf = j.pdf || ''; r.sent = true;
+        r.links = j.links || []; r.pdf = j.pdf || ''; r.sent = true; r.dirty = false; r.nPhoto = 0;
         if (j.pdfError) toast('지출은 저장했지만 붙임 용지 PDF 를 만들지 못했습니다: ' + j.pdfError, 6000);
         await photos.del(r.id);
       }
       r.sync = 'done'; save(); renderList(); renderSync();
     } catch (e) {
       lastErr = netMsg(e);
+      if (/알 수 없는 요청/.test(lastErr)) lastErr = '구글 코드가 옛 판이라 고친 내용을 받지 못합니다. Apps Script 를 budget-v8 로 다시 배포해 주세요.';
       break;
     }
   }
@@ -697,11 +700,18 @@ async function getRate(manual) {
 }
 
 /* ---------- 지출 입력 ---------- */
-function openAdd() {
+// rec 를 주면 그 지출 고치기, 없으면 새 지출
+function openAdd(rec) {
   const g0 = groups()[0];
-  F = {cur: 'AUD', card: (S.cfg.cards[0] || {}).no || '', shots: [], cat: g0 ? g0.name : '', item: ''};
+  F = {cur: 'AUD', card: (S.cfg.cards[0] || {}).no || '', shots: [], cat: g0 ? g0.name : '', item: '', edit: null};
   if (g0 && g0.items.length === 1) F.item = g0.items[0].item;
   $('aDate').value = today(); $('aPlace').value = ''; $('aAmt').value = ''; $('aMemo').value = ''; $('aErr').textContent = '';
+  if (rec) {
+    F = Object.assign(F, {cur: rec.cur, card: rec.card || F.card, cat: rec.cat, item: rec.item, edit: rec});
+    $('aDate').value = rec.date; $('aPlace').value = rec.place; $('aAmt').value = rec.expr || String(rec.amt); $('aMemo').value = rec.memo || '';
+  }
+  $('addTitle').textContent = rec ? `지출 고치기 · No. ${rec.no}` : '지출 기록';
+  $('btnSave').textContent = rec ? '고친 내용 저장' : '저장';
   drawForm(); $('dlgAdd').showModal();
 }
 
@@ -711,12 +721,14 @@ function drawForm() {
   $('segCat').innerHTML = gs.map((x) => `<button type="button" data-v="${esc(x.name)}" class="${x.name === F.cat ? 'on' : ''}">${esc(x.name)}</button>`).join('');
   $('segCard').innerHTML = S.cfg.cards.map((c) => `<button type="button" data-v="${esc(c.no)}" class="${c.no === F.card ? 'on' : ''}">${esc(c.no)} (${esc(c.name)})</button>`).join('');
   $('segItem').innerHTML = (g ? g.items : []).map((x) => `<button type="button" data-v="${esc(x.item)}" class="${x.item === F.item ? 'on' : ''}">${esc(x.item)}</button>`).join('');
+  const ed = F.edit, had = ed ? Math.max((ed.links || []).length, ed.sent ? 0 : ed.nPhoto || 0) : 0;
+  $('oldShots').textContent = had ? `먼저 넣은 영수증 사진 ${had}장은 그대로 둡니다. 여기서 더 넣으면 덧붙습니다.` : '';
   $('shots').innerHTML = F.shots.map((d, i) => `<div class="shot"><img src="${d}" alt="영수증 ${i + 1}"><button type="button" data-rm="${i}" aria-label="사진 빼기">×</button></div>`).join('');
   const raw = $('aAmt').value.trim(), v = calc(raw), box = $('calc');
   box.classList.remove('err');
   if (!raw) { box.textContent = '금액을 넣으면 원화로 얼마인지 여기에 나옵니다.'; $('aSum').textContent = '0원'; return; }
   if (isNaN(v) || v <= 0) { box.classList.add('err'); box.textContent = '금액을 읽지 못했습니다. 숫자와 + - × ÷ 만 쓸 수 있습니다.'; $('aSum').textContent = '0원'; return; }
-  const amt = Math.round(v * 100) / 100, m = money(F.cur, amt);
+  const amt = Math.round(v * 100) / 100, m = money(F.cur, amt, keepRate());
   const head = /[+\-*/×÷xX(]/.test(raw) ? `계산 결과 ${amt.toLocaleString('ko-KR')} ${F.cur === 'KRW' ? '원' : F.cur} · ` : '';
   box.textContent = F.cur === 'KRW'
     ? head + '원화 그대로 기록합니다'
@@ -734,14 +746,39 @@ async function addShots(files) {
   drawForm();
 }
 
+// 고치는 중이고 통화가 그대로면 처음 저장할 때의 환율을 쓴다
+function keepRate() { return F.edit && F.edit.cur === F.cur && F.cur !== 'KRW' ? F.edit.rate : 0; }
+
+// 지출 고치기 저장: 번호·영수증 사진은 그대로, 새로 넣은 사진은 덧붙인다.
+// 이미 드라이브에 올라간 지출이면 dirty 로 표시해 두었다가 syncAll 이 시트·붙임 용지를 고친다.
+async function saveEdit(date, place, raw, amt, m) {
+  const r = F.edit;
+  Object.assign(r, {date, place, cat: F.cat, item: F.item, cur: F.cur, amt, expr: raw, rate: m.rate, krw: m.krw, fee: m.fee,
+    total: m.total, card: F.card, memo: $('aMemo').value.trim()});
+  let kept = true;
+  if (F.shots.length) {
+    $('btnSave').disabled = true;
+    const prev = await photos.get(r.id);
+    kept = await photos.put(r.id, prev.concat(F.shots));
+    $('btnSave').disabled = false;
+    r.nPhoto = (r.sent ? 0 : r.nPhoto || 0) + F.shots.length;
+  } else if (r.sent) r.nPhoto = 0;
+  if (r.sent) r.dirty = true;
+  r.sync = 'pending';
+  save(); $('dlgAdd').close(); render();
+  toast(!kept ? '사진을 이 기기에 보관하지 못했습니다. 창을 닫지 말고 올라갈 때까지 기다려 주세요.' : (S.cfg.url ? '고쳤습니다. 드라이브에도 고칩니다…' : '이 기기에서 고쳤습니다.'), kept ? 2600 : 5000);
+  syncAll();
+}
+
 async function saveRec() {
   const place = $('aPlace').value.trim(), date = $('aDate').value, raw = $('aAmt').value.trim(), v = calc(raw);
   if (!F.cat || !F.item) return ($('aErr').textContent = '항목을 골라 주세요.');
   if (!date) return ($('aErr').textContent = '날짜를 골라 주세요.');
   if (!place) return ($('aErr').textContent = '지출처를 적어 주세요.');
   if (isNaN(v) || v <= 0) return ($('aErr').textContent = '금액을 다시 확인해 주세요.');
-  const amt = Math.round(v * 100) / 100, m = money(F.cur, amt);
+  const amt = Math.round(v * 100) / 100, m = money(F.cur, amt, keepRate());
   if (!m.rate) return ($('aErr').textContent = '환율이 0 입니다. 설정에서 환율을 넣어 주세요.');
+  if (F.edit) return saveEdit(date, place, raw, amt, m);
   const no = S.recs.reduce((a, x) => Math.max(a, Number(x.no) || 0), 0) + 1;   // 영수증 번호(취소해도 다시 쓰지 않는다)
   const r = {id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), ts: Date.now(), no, date, place,
     cat: F.cat, item: F.item, cur: F.cur, amt, expr: raw, rate: m.rate, krw: m.krw, fee: m.fee, total: m.total, card: F.card,
@@ -959,7 +996,7 @@ $('btnNH').onclick = () => { $('sSpread').value = DEF.spread; $('sFee').value = 
 $('btnView').onclick = () => { S.cfg.view = S.cfg.view === 'new' ? 'item' : 'new'; save(); renderList(); };
 $('btnAttGo').onclick = makeAtt;
 $('tFrom').onchange = $('tTo').onchange = attInfo;
-$('btnAdd').onclick = openAdd;
+$('btnAdd').onclick = () => openAdd();
 $('btnSet').onclick = openSet;
 $('btnSave').onclick = saveRec;
 $('btnSetSave').onclick = saveSet;
@@ -982,6 +1019,8 @@ $('segItem').onclick = (e) => { const b = e.target.closest('button'); if (b) { F
 $('segCur').onclick = (e) => { const b = e.target.closest('button'); if (b) { F.cur = b.dataset.v; drawForm(); } };
 $('shots').onclick = (e) => { const b = e.target.closest('[data-rm]'); if (b) { F.shots.splice(+b.dataset.rm, 1); drawForm(); } };
 $('list').onclick = (e) => {
+  const ed = e.target.closest('[data-edit]');
+  if (ed) { const r = S.recs.find((x) => x.id === ed.dataset.edit); if (r && !r.del) openAdd(r); return; }
   const b = e.target.closest('[data-del]'); if (!b) return;
   const r = S.recs.find((x) => x.id === b.dataset.del); if (!r) return;
   delId = r.id; $('delMsg').textContent = `${r.date} · ${r.place} · ${won(r.total)}원`; $('dlgDel').showModal();

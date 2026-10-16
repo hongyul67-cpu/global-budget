@@ -13,10 +13,10 @@
  * [처음 배포]  script.google.com → 새 프로젝트 → 이 코드 붙여넣기 → 저장
  *   → 배포 → 새 배포 → 웹 앱 / 실행: 나 / 액세스: 모든 사용자 → 나온 URL 을 앱 ⚙ 설정에 붙여넣기
  * [코드 고친 뒤]  배포 → 배포 관리 → (기존 배포) 연필 → 버전 "새 버전" → 배포  (URL 유지)
- * [확인]  URL 을 브라우저로 열어 build 값이 "budget-v7" 이면 이 버전이 라이브
+ * [확인]  URL 을 브라우저로 열어 build 값이 "budget-v8" 이면 이 버전이 라이브
  */
 const TOKEN = 'gbudget-2026';
-const BUILD = 'budget-v7';
+const BUILD = 'budget-v8';
 const RECEIPT_FOLDER = '글로벌 현장학습 영수증';
 const ATTACH_FOLDER = '붙임 용지';
 const BOOK_NAME = '글로벌 현장학습 지출 장부';
@@ -24,7 +24,7 @@ const SHEET_LOG = '지출';
 const SHEET_SUM = '요약';
 const HEAD = ['번호', '날짜', '지출처', '구분', '항목', '통화', '금액', '환율', '원화 환산',
   '카드 수수료 여유분', '합계(원)', '메모', '영수증 링크', '상태', '기록시각', '계산식', 'id', '붙임 용지 PDF', '카드(끝 4자리)'];
-const COL_ID = 17, COL_LINK = 13, COL_STATE = 14, COL_PDF = 18;
+const COL_ID = 17, COL_LINK = 13, COL_STATE = 14, COL_PDF = 18, COL_CARD = 19;
 
 function doGet() {
   return json_({ ok: true, build: BUILD });
@@ -41,6 +41,7 @@ function doPost(e) {
     if (data.action === 'ping') return json_({ ok: true, build: BUILD, book: book_().getUrl(), folder: folder_().getUrl() });
     if (data.action === 'add') return json_(add_(data));
     if (data.action === 'cancel') return json_(cancel_(data));
+    if (data.action === 'update') return json_(update_(data));
     if (data.action === 'list') return json_(list_());
     if (data.action === 'budget') return json_(budget_(data));
     if (data.action === 'attach') return json_(attach_(data));
@@ -84,6 +85,42 @@ function add_(data) {
     sheet.getRange(sheet.getLastRow(), COL_PDF).setValue(pdf);
   } catch (err) { pdfError = String(err); }
   return { ok: true, links: links, pdf: pdf, pdfError: pdfError };
+}
+
+// 지출 고치기: 시트의 같은 줄 내용을 바꾸고, 새로 찍은 사진은 덧붙이고, 붙임 용지 PDF 를 다시 만든다.
+// 옛 PDF 는 휴지통으로 보낸다(30일 동안은 드라이브 휴지통에서 되살릴 수 있다). 영수증 사진은 지우지 않는다.
+function update_(data) {
+  var r = data.rec || {};
+  var sheet = logSheet_();
+  var row = findRow_(sheet, r.id);
+  if (!row) return add_(data);                   // 아직 시트에 없으면 새로 넣는다
+
+  var old = String(sheet.getRange(row, COL_LINK).getValue() || '');
+  var links = old ? old.split('\n') : [];
+  var safe = function (s) { return String(s || '').replace(/[\\/:*?"<>|\n\r]/g, ' ').trim().slice(0, 30); };
+  var day = dayFolder_(r.date);
+  var base = ('00' + r.no).slice(-3) + '_' + safe(r.date) + '_' + safe(r.place) + '_' + r.amt + r.cur;
+  (data.photos || []).forEach(function (b64) {
+    var blob = Utilities.newBlob(Utilities.base64Decode(b64), 'image/jpeg', base + '_' + (links.length + 1) + '.jpg');
+    links.push(day.createFile(blob).getUrl());
+  });
+
+  // 2~12열: 날짜·지출처·구분·항목·통화·금액·환율·원화 환산·수수료·합계·메모
+  sheet.getRange(row, 2, 1, 11).setValues([[r.date, r.place, r.cat, r.item, r.cur, r.amt, r.rate, r.krw, r.fee, r.total, r.memo || '']]);
+  sheet.getRange(row, COL_LINK).setValue(links.join('\n'));
+  sheet.getRange(row, 16).setValue("'" + (r.expr || ''));
+  sheet.getRange(row, COL_CARD).setValue(r.card || '');
+
+  var oldPdf = String(sheet.getRange(row, COL_PDF).getValue() || ''), pdf = '', pdfError = '';
+  try {
+    pdf = attachOne_({ no: r.no, card: r.card || '', date: r.date, place: r.place, cat: r.cat, item: r.item, cur: r.cur, amt: r.amt,
+      rate: r.rate, krw: r.krw, fee: r.fee, total: r.total, memo: r.memo || '', links: links },
+      data.titles, data.drafter).getUrl();
+    sheet.getRange(row, COL_PDF).setValue(pdf);
+    var m = /\/d\/([\w-]+)/.exec(oldPdf);
+    if (m) { try { DriveApp.getFileById(m[1]).setTrashed(true); } catch (x) {} }
+  } catch (err) { pdfError = String(err); }
+  return { ok: true, links: links, pdf: pdf || oldPdf, pdfError: pdfError };
 }
 
 // 지출 취소: 줄을 지우지 않고 상태만 '취소' 로 바꾼다(영수증 파일도 그대로 둔다)
