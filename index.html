@@ -121,6 +121,9 @@ dialog .bd{padding-bottom:0}
 .aud .r b{font-size:16px;color:var(--ink)}.aud .s{font-size:12.5px;color:var(--sub);margin-top:5px}.aud .s b{color:var(--g)}
 small.a{color:var(--sub);font-weight:400}
 #segCur button{font-size:13.5px;padding:9px 2px;word-break:keep-all;line-height:1.25}
+header .tt{flex:1;min-width:0}
+header .ver{display:block;font-size:11px;opacity:.75;margin-top:2px}
+.rate small#rMk{width:100%;opacity:.85}
 .chips{display:flex;flex-wrap:wrap;gap:6px}
 .chips button{border:1px solid var(--line);background:#fff;border-radius:10px;padding:9px 12px;font-weight:700;font-size:14px}
 .chips button.on{background:var(--g);border-color:var(--g);color:#fff}
@@ -134,12 +137,13 @@ hr{border:0;border-top:1px solid var(--line);margin:16px 0 4px}
 <body>
 <header><div class="wrap">
   <div class="row">
-    <h1>글로벌 현장학습 예산 장부</h1>
+    <div class="tt"><h1>글로벌 현장학습 예산 장부</h1><small class="ver" id="ver"></small></div>
     <button class="gear" id="btnSet" aria-label="설정">⚙</button>
   </div>
   <div class="rate">
     <b id="rAUD"></b><b id="rSGD"></b><b id="rUSD"></b>
     <button id="btnRate">환율 새로 받기</button>
+    <small id="rMk"></small>
     <small id="rAt"></small>
   </div>
 </div></header>
@@ -265,10 +269,17 @@ hr{border:0;border-top:1px solid var(--line);margin:16px 0 4px}
       <div><label class="f" for="sUSD">미국 달러 1 = (원)</label><input class="in" id="sUSD" inputmode="decimal"></div>
       <div><label class="f" for="sSGD">싱가포르 달러 1 = (원)</label><input class="in" id="sSGD" inputmode="decimal"></div>
     </div>
-    <p class="note">자동으로 받은 값은 시장 기준 환율입니다. 실제 환전·카드 환율을 알면 여기에 직접 적으세요. 이미 저장한 지출은 저장할 때의 환율 그대로 남습니다.</p>
-    <label class="f" for="sFee">카드 수수료 여유분 (%)</label>
-    <input class="in" id="sFee" inputmode="decimal">
-    <p class="note">외화(호주·싱가포르·미국 달러)로 긁은 지출은 시장 환율로 바꾼 뒤 이 비율만큼 더해서 잡습니다. 0 을 넣으면 더하지 않습니다.</p>
+    <p class="note">위 칸은 <b>시장 환율</b>(은행 매매기준율 근처)입니다. 자동으로 받거나 직접 적을 수 있습니다. 이미 저장한 지출은 저장할 때의 환율 그대로 남습니다.</p>
+    <label class="f">농협 비자 카드로 어림하기 <small>— 시장 환율에 아래 두 가지를 더해 청구액을 잡습니다</small></label>
+    <div class="g2">
+      <div><label class="f" for="sSpread">환율 가산 (%)</label><input class="in" id="sSpread" inputmode="decimal"></div>
+      <div><label class="f" for="sFee">카드 수수료 (%)</label><input class="in" id="sFee" inputmode="decimal"></div>
+    </div>
+    <p class="note"><b>환율 가산 1.2%</b> = 비자가 호주·싱가포르 달러를 미국 달러로 바꿀 때 약 0.2% + 농협이 미국 달러를 원화로 바꿀 때 쓰는 전신환매도율이 매매기준율보다 약 1.0% 높은 몫.<br>
+    <b>카드 수수료 1.35%</b> = 비자 국제브랜드 수수료 1.1% + 농협 해외서비스 수수료 0.25%.<br>
+    실제 청구는 가게가 매출을 넘긴 날(매입일)의 환율로 정해지므로 며칠 뒤 명세서와 조금 다를 수 있습니다. 결제할 때 <b>원화 결제(DCC)를 물으면 꼭 호주 달러로</b> 고르세요(원화로 고르면 3~8% 더 나옵니다).</p>
+    <p class="note warn" id="nhPrev"></p>
+    <div class="act"><button class="btn plain" id="btnNH">농협 비자 기본값으로 (1.2% · 1.35%)</button></div>
 
     <div class="foot">
       <div class="err" id="sErr"></div>
@@ -330,10 +341,15 @@ hr{border:0;border-top:1px solid var(--line);margin:16px 0 4px}
 
 <script>
 const TOKEN = 'gbudget-2026';
+const APP_VER = '2026-10-16';   // 화면을 고칠 때마다 날짜를 바꾼다(머리에 "10월 16일 수정판"으로 보임)
 const LS = 'gbudget.v2';
 const RATE_API = 'https://open.er-api.com/v6/latest/USD';
 const DEF = {
-  url: '', book: '', folder: '', feePct: 2,
+  url: '', book: '', folder: '', build: '',
+  // 농협 비자 카드 청구액 어림(2026-10-16): 시장 환율 × (1 + 환율 가산) 에 카드 수수료를 더한다.
+  //   환율 가산 1.2% = 비자가 현지 통화→미국 달러 환산(≈0.2%) + 농협 전신환매도율이 매매기준율보다 높은 몫(≈1.0%)
+  //   카드 수수료 1.35% = 비자 국제브랜드 수수료 1.1% + 농협 해외서비스 수수료 0.25%
+  spread: 1.2, feePct: 1.35,
   // 학교 카드(끝 4자리). 지출을 적을 때 고른다. 첫째가 기본.
   cards: [{no: '8020', name: '주'}, {no: '8012', name: '보조'}],
   drafter: '윤홍열',     // 품의자 = 신용카드 사용자 성명(붙임 용지에 찍힘)
@@ -392,6 +408,8 @@ function load() {
   try {
     const j = JSON.parse(localStorage.getItem(LS));
     if (j && j.cfg && Array.isArray(j.recs)) {
+      // 카드 환율 가산이 없던 예전 기기: 그때 기본값이던 수수료 2% 는 농협 비자 기준 1.35% 로 바꾼다
+      if (!('spread' in j.cfg) && (j.cfg.feePct === 2 || j.cfg.feePct == null)) j.cfg.feePct = 1.35;
       j.cfg = Object.assign({}, DEF, j.cfg);
       // 싱가포르 달러가 없던 예전 기기: 자동 환율을 쓰던 중이면 바로 다시 받고, 직접 넣은 환율이면 기본값만 채운다
       if (!(j.cfg.rates && j.cfg.rates.SGD) && j.cfg.rateAuto) j.cfg.rateAt = 0;
@@ -457,8 +475,13 @@ function calc(src) {
 }
 
 // 금액 → 원화(시장 환율)·카드 수수료 여유분·합계
+// 카드 예상 환율: 시장 환율에 환율 가산(%)을 더한 값(소수 첫째 자리)
+function cardRate(cur) {
+  const m = Number(S.cfg.rates[cur]) || 0;
+  return Math.round(m * (1 + (Number(S.cfg.spread) || 0) / 100) * 10) / 10;
+}
 function money(cur, amt) {
-  const rate = cur === 'KRW' ? 1 : Number(S.cfg.rates[cur]) || 0;
+  const rate = cur === 'KRW' ? 1 : cardRate(cur);
   const krw = Math.round(amt * rate);
   // 결제는 모두 카드. 해외 결제 수수료는 외화로 긁을 때만 붙으므로 원화 지출에는 더하지 않는다.
   const fee = cur !== 'KRW' ? Math.round(krw * (Number(S.cfg.feePct) || 0) / 100) : 0;
@@ -486,9 +509,13 @@ function live() { return S.recs.filter((r) => !r.del); }
 
 function render() {
   const c = S.cfg;
-  $('rAUD').textContent = `호주 달러 1 = ${Number(c.rates.AUD).toLocaleString('ko-KR')}원`;
-  $('rUSD').textContent = `미국 달러 1 = ${Number(c.rates.USD).toLocaleString('ko-KR')}원`;
-  $('rSGD').textContent = `싱가포르 달러 1 = ${Number(c.rates.SGD).toLocaleString('ko-KR')}원`;
+  const kr = (n) => Number(n).toLocaleString('ko-KR');
+  $('rAUD').textContent = `호주 달러 1 ≈ ${kr(cardRate('AUD'))}원`;
+  $('rUSD').textContent = `미국 달러 1 ≈ ${kr(cardRate('USD'))}원`;
+  $('rSGD').textContent = `싱가포르 달러 1 ≈ ${kr(cardRate('SGD'))}원`;
+  $('rMk').textContent = `카드(농협 비자) 예상 = 시장 환율 + ${kr(c.spread)}% (시장: 호주 ${kr(c.rates.AUD)} · 싱가포르 ${kr(c.rates.SGD)} · 미국 ${kr(c.rates.USD)}원)`;
+  const vd = APP_VER.split('-');
+  $('ver').textContent = `${+vd[1]}월 ${+vd[2]}일 수정판` + (c.build ? ` · 구글 코드 ${c.build}` : '');
   $('rAt').textContent = c.rateAuto && c.rateAt
     ? `시장 기준 환율 · ${new Date(c.rateAt).toLocaleString('ko-KR', {month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit'})} 에 받음`
     : '직접 넣은 환율입니다 (설정에서 바꿀 수 있음)';
@@ -504,9 +531,9 @@ function render() {
   $('left').style.color = used > total ? 'var(--bad)' : '';
   setBar($('barAll'), used, total);
   // 호주 달러로 보기: 지금 환율로 원화를 나눈 값. 남은 돈은 카드 수수료 여유분만큼 덜 쓸 수 있다.
-  const ra = Number(c.rates.AUD) || 0, A = (n) => 'A$ ' + Math.round(n / ra).toLocaleString('ko-KR');
+  const ra = cardRate('AUD'), A = (n) => 'A$ ' + Math.round(n / ra).toLocaleString('ko-KR');
   const spend = (total - used) / (1 + (Number(c.feePct) || 0) / 100);
-  $('aud').innerHTML = ra ? `<div class="h">호주 달러로 보면 <small>(1 AUD = ${ra.toLocaleString('ko-KR')}원)</small></div>
+  $('aud').innerHTML = ra ? `<div class="h">호주 달러로 보면 <small>(카드 예상 1 AUD ≈ ${ra.toLocaleString('ko-KR')}원)</small></div>
     <div class="r"><span>총 예산<b>${A(total)}</b></span><span>사용<b>${A(used)}</b></span><span>잔액<b>${A(total - used)}</b></span></div>
     ${c.feePct > 0 && total > used ? `<div class="s">카드 수수료 ${c.feePct}% 를 빼면 호주에서 더 쓸 수 있는 돈은 약 <b>${A(spend)}</b></div>` : ''}` : '';
   $('feeNote').textContent = fee ? `카드 수수료 여유분 ${won(fee)}원이 들어 있습니다 (${c.feePct}%).` : '';
@@ -543,7 +570,7 @@ function catRow(name, budget, list, sub, nItems, over) {
   const warn = over ? ` <span class="chip bad">예산 넘은 항목 ${over}개</span>` : '';
   return `<div class="cat"><div class="top"><b>${esc(name)}</b><span>${won(u)} / ${won(budget)}원</span></div>
     <div class="bar" data-u="${u}" data-b="${Number(budget) || 0}"><i></i></div>
-    <div class="two"><span>${list.length}건${warn}</span><span>잔액 <b>${won(budget - u)}원</b>${Number(S.cfg.rates.AUD) ? ` <small class="a">(A$ ${Math.round((budget - u) / S.cfg.rates.AUD).toLocaleString('ko-KR')})</small>` : ''}</span></div>${fold}</div>`;
+    <div class="two"><span>${list.length}건${warn}</span><span>잔액 <b>${won(budget - u)}원</b>${cardRate('AUD') ? ` <small class="a">(A$ ${Math.round((budget - u) / cardRate('AUD')).toLocaleString('ko-KR')})</small>` : ''}</span></div>${fold}</div>`;
 }
 
 function setBar(el, u, b) {
@@ -693,7 +720,7 @@ function drawForm() {
   const head = /[+\-*/×÷xX(]/.test(raw) ? `계산 결과 ${amt.toLocaleString('ko-KR')} ${F.cur === 'KRW' ? '원' : F.cur} · ` : '';
   box.textContent = F.cur === 'KRW'
     ? head + '원화 그대로 기록합니다'
-    : head + `환율 ${m.rate.toLocaleString('ko-KR')}원 → ${won(m.krw)}원` + (m.fee ? ` + 카드 여유분 ${won(m.fee)}원` : '');
+    : head + `카드 예상 환율 ${m.rate.toLocaleString('ko-KR')}원 → ${won(m.krw)}원` + (m.fee ? ` + 카드 여유분 ${won(m.fee)}원` : '');
   $('aSum').textContent = won(m.total) + '원';
 }
 
@@ -731,7 +758,7 @@ async function saveRec() {
 /* ---------- 설정 ---------- */
 function openSet() {
   const c = S.cfg;
-  $('sUrl').value = c.url; $('sAUD').value = c.rates.AUD; $('sUSD').value = c.rates.USD; $('sSGD').value = c.rates.SGD; $('sFee').value = c.feePct; $('sDrafter').value = attCfg().drafter;
+  $('sUrl').value = c.url; $('sAUD').value = c.rates.AUD; $('sUSD').value = c.rates.USD; $('sSGD').value = c.rates.SGD; $('sFee').value = c.feePct; $('sSpread').value = c.spread; nhPrev(); $('sDrafter').value = attCfg().drafter;
   $('sCard1').value = (c.cards[0] || {}).no || ''; $('sCard2').value = (c.cards[1] || {}).no || '';
   $('sErr').textContent = ''; $('pingMsg').textContent = ''; $('pingMsg').className = 'note';
   $('bRows').innerHTML = ''; c.items.forEach((x) => addCatRow(x.cat, x.item, x.budget));
@@ -757,7 +784,7 @@ async function ping() {
   m.className = 'note'; m.textContent = '확인하는 중…';
   try {
     const j = await post({action: 'ping'});
-    S.cfg.book = j.book || ''; S.cfg.folder = j.folder || ''; save(); drawOpeners();
+    S.cfg.book = j.book || ''; S.cfg.folder = j.folder || ''; S.cfg.build = j.build || ''; save(); drawOpeners(); render();
     m.textContent = `연결되었습니다 (${j.build}). 이제 저장하면 드라이브로 올라갑니다.`;
     await pushBudget(); renderSync(); syncAll();
   } catch (e) { m.className = 'note warn'; m.textContent = '연결하지 못했습니다: ' + netMsg(e); renderSync(); }
@@ -768,7 +795,7 @@ function saveSet() {
     const i = d.querySelectorAll('input');
     return {cat: i[0].value.trim(), item: i[1].value.trim(), budget: Number(i[2].value.replace(/[^\d.]/g, '')) || 0};
   }).filter((x) => x.cat || x.item);
-  const aud = Number($('sAUD').value), usd = Number($('sUSD').value), sgd = Number($('sSGD').value), fee = Number($('sFee').value);
+  const aud = Number($('sAUD').value), usd = Number($('sUSD').value), sgd = Number($('sSGD').value), fee = Number($('sFee').value), spread = Number($('sSpread').value);
   const k1 = $('sCard1').value.trim(), k2 = $('sCard2').value.trim();
   if (!/^\d{4}$/.test(k1) || (k2 && !/^\d{4}$/.test(k2))) return ($('sErr').textContent = '카드 번호는 끝 4자리 숫자로 적어 주세요(보조 카드는 비워도 됩니다).');
   const u = $('sUrl').value.trim();
@@ -776,11 +803,12 @@ function saveSet() {
   if (rows.some((x) => !x.cat || !x.item)) return ($('sErr').textContent = '구분과 항목 이름을 모두 적어 주세요.');
   if (new Set(rows.map((x) => x.cat + '|' + x.item)).size !== rows.length) return ($('sErr').textContent = '구분과 항목이 똑같은 줄이 있습니다.');
   if (!(aud > 0) || !(usd > 0) || !(sgd > 0)) return ($('sErr').textContent = '환율은 0 보다 큰 숫자여야 합니다.');
-  if (!(fee >= 0) || fee > 20) return ($('sErr').textContent = '수수료 여유분은 0~20 사이로 넣어 주세요.');
+  if (!(fee >= 0) || fee > 20) return ($('sErr').textContent = '카드 수수료는 0~20 사이로 넣어 주세요.');
+  if (!(spread >= 0) || spread > 10) return ($('sErr').textContent = '환율 가산은 0~10 사이로 넣어 주세요.');
   if (u && !goodUrl(u)) return ($('sErr').textContent = '연결 주소 모양이 다릅니다. 비워 두거나 다시 붙여 넣어 주세요.');
   const c = S.cfg;
   if (aud !== c.rates.AUD || usd !== c.rates.USD || sgd !== c.rates.SGD) { c.rateAuto = false; c.rates = {AUD: aud, USD: usd, SGD: sgd}; }
-  c.items = rows; c.feePct = fee; c.url = u;
+  c.items = rows; c.feePct = fee; c.spread = spread; c.url = u;
   c.att = Object.assign({titles: {}}, c.att, {drafter: $('sDrafter').value.trim()});
   c.cards = [{no: k1, name: '주'}].concat(k2 ? [{no: k2, name: '보조'}] : []);
   save(); $('dlgSet').close(); render(); toast('설정을 저장했습니다');
@@ -918,8 +946,16 @@ async function makeAtt() {
   btn.disabled = false; btn.textContent = 'PDF 만들기';
 }
 
+function nhPrev() {
+  const m = Number($('sAUD').value) || 0, sp = Number($('sSpread').value) || 0, f = Number($('sFee').value) || 0;
+  const r = Math.round(m * (1 + sp / 100) * 10) / 10, k = Math.round(100 * r), t = k + Math.round(k * f / 100);
+  $('nhPrev').textContent = m ? `예) 100 호주 달러 결제 → 카드 예상 환율 ${r.toLocaleString('ko-KR')}원 → 약 ${won(t)}원 청구 (시장 환율로만 치면 ${won(100 * m)}원, ${((t / (100 * m) - 1) * 100).toFixed(1)}% 더)` : '';
+}
+
 /* ---------- 단추 연결 ---------- */
 $('btnAtt').onclick = openAtt;
+$('btnNH').onclick = () => { $('sSpread').value = DEF.spread; $('sFee').value = DEF.feePct; nhPrev(); };
+['sAUD', 'sSpread', 'sFee'].forEach((id) => ($(id).oninput = nhPrev));
 $('btnView').onclick = () => { S.cfg.view = S.cfg.view === 'new' ? 'item' : 'new'; save(); renderList(); };
 $('btnAttGo').onclick = makeAtt;
 $('tFrom').onchange = $('tTo').onchange = attInfo;
