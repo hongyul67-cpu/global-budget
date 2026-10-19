@@ -114,6 +114,11 @@ dialog .bd{padding-bottom:0}
 .gh span:last-child,.ih span:last-child{font-weight:600;font-size:12.5px;white-space:nowrap}
 .ih{margin-top:8px;padding:6px 10px;border-radius:8px;background:var(--gs);color:var(--g);font-weight:700;font-size:13.5px}
 .ih + .rec{border-top:0}.gh:first-child{margin-top:4px}
+.fd>summary{list-style:none;cursor:pointer;-webkit-tap-highlight-color:transparent}.fd>summary::-webkit-details-marker{display:none}
+.fd>summary>span:first-child::before{content:'▸';display:inline-block;width:1.1em}
+.fd[open]>summary>span:first-child::before{content:'▾'}
+#list>.fd>summary.gh{margin-top:14px}#list>.fd:first-child>summary.gh{margin-top:4px}
+.fd>summary.ih{margin-top:8px}.fd:not([open])>summary.ih{opacity:.92}
 .aud{margin-top:10px;border:1px solid var(--gl);background:var(--gs);border-radius:12px;padding:9px 12px}
 .aud .h{font-size:13px;font-weight:700;color:var(--g)}.aud .h small{font-weight:400;color:var(--sub)}
 .aud .r{display:flex;justify-content:space-between;gap:6px;margin-top:4px}
@@ -187,6 +192,7 @@ hr{border:0;border-top:1px solid var(--line);margin:16px 0 4px}
       <button class="btn plain" id="btnCsv">엑셀 내려받기</button>
       <button class="btn plain" id="btnAtt">영수증 붙임 용지</button>
       <button class="btn plain" id="btnView"></button>
+      <button class="btn plain" id="btnFold"></button>
     </div>
     <div id="list"></div>
   </div>
@@ -357,7 +363,7 @@ hr{border:0;border-top:1px solid var(--line);margin:16px 0 4px}
 
 <script>
 const TOKEN = 'gbudget-2026';
-const APP_VER = '2026-10-17 7';   // 화면을 고칠 때마다 날짜를 바꾼다(머리에 "10월 17일 수정판 6"). 같은 날 또 고치면 뒤 숫자
+const APP_VER = '2026-10-19';   // 화면을 고칠 때마다 날짜를 바꾼다(머리에 "10월 17일 수정판 6"). 같은 날 또 고치면 뒤 숫자
 const LATEST_BUILD = 9;           // apps-script.gs 의 최신 BUILD 번호(budget-v9). 구글 코드를 고치면 같이 올린다.
 const buildNo = (b) => +(String(b || '').match(/budget-v(\d+)/) || [0, 0])[1];
 const LS = 'gbudget.v2';
@@ -421,6 +427,13 @@ let renamed = false;
 let S = load();
 let busy = false, lastErr = '', delId = null;
 const OPEN = new Set();   // 「구분 · 항목별」에서 펼쳐 둔 구분 이름
+// 「지출 내역」에서 접고 펼친 제목. 키는 g:구분, i:구분\t항목, d:날짜. 손대지 않은 제목은 기본값을 따른다.
+// 장부 데이터와 섞이지 않도록 따로 저장한다.
+const FOLD_LS = LS + '-fold';
+let FOLD = (() => { try { return JSON.parse(localStorage.getItem(FOLD_LS)) || {}; } catch (e) { return {}; } })();
+function saveFold() { try { localStorage.setItem(FOLD_LS, JSON.stringify(FOLD)); } catch (e) {} }
+// 방금 적거나 고친 지출이 접힌 제목 아래에 숨지 않게 그 제목들을 펼친다
+function unfold(r) { FOLD['g:' + r.cat] = FOLD['i:' + r.cat + '\t' + r.item] = FOLD['d:' + r.date] = true; saveFold(); }
 let F = null;   // 지금 쓰고 있는 입력 내용
 
 function load() {
@@ -633,26 +646,52 @@ function renderList() {
     $('list').innerHTML = `<div class="empty">${live().length ? '찾는 지출이 없습니다.' : '아직 기록이 없습니다.<br>아래 초록 단추로 첫 영수증을 찍어 보세요.'}</div>`;
     return;
   }
-  if (!grouped) { $('list').innerHTML = list.map(recRow).join(''); return; }
-  // 예산표 순서대로 구분 › 항목 제목을 달고, 그 아래에 그 항목의 지출을 번호 순으로 모은다
-  const head = (cls, name, l, budget) => { const v = l.filter((r) => !r.del), u = v.reduce((a, r) => a + r.total, 0);
-    return `<div class="${cls}"><span>${esc(name)}</span><span>${v.length}건 · ${won(u)}원${budget ? ' · 예산의 ' + pctTag(u, budget).replace(/<[^>]+>/g, '') : ''}</span></div>`; };
-  const byNo = (a, b) => (a.no || 0) - (b.no || 0), seen = new Set();
+  // 제목을 누르면 그 아래 지출이 접히고 펼쳐진다. 검색 중에는 찾은 지출이 보이도록 모두 펼친다.
+  const all = !!q;
+  const info = (l, budget) => { const u = l.reduce((a, r) => a + r.total, 0);
+    return `${l.length}건 · ${won(u)}원${budget ? ' · 예산의 ' + pctTag(u, budget).replace(/<[^>]+>/g, '') : ''}`; };
+  const box = (key, def, cls, name, txt, body) => `<details class="fd" data-k="${esc(key)}"${all || (key in FOLD ? FOLD[key] : def) ? ' open' : ''}>`
+    + `<summary class="${cls}"><span>${esc(name)}</span><span>${txt}</span></summary>${body}</details>`;
   let html = '';
-  for (const g of groups()) {
-    const gl = list.filter((r) => r.cat === g.name && g.items.some((x) => x.item === r.item));
-    if (!gl.length) continue;
-    html += head('gh', g.name, gl, g.budget);
-    for (const x of g.items) {
-      const il = gl.filter((r) => r.item === x.item).sort(byNo);
-      if (!il.length) continue;
-      il.forEach((r) => seen.add(r.id));
-      html += head('ih', x.item, il, Number(x.budget) || 0) + il.map(recRow).join('');
+  if (!grouped) {
+    // 최신순: 날짜별로 묶는다. 처음에는 가장 최근 날짜만 펼쳐 둔다.
+    const wd = (s) => '일월화수목금토'[new Date(Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10))).getUTCDay()];
+    const days = [...new Set(list.map((r) => r.date))];
+    html = days.map((d, i) => { const dl = list.filter((r) => r.date === d);
+      return box('d:' + d, i === 0, 'ih', `${+d.slice(5, 7)}월 ${+d.slice(8, 10)}일 (${wd(d)})`, info(dl), dl.map(recRow).join('')); }).join('');
+  } else {
+    // 예산표 순서대로 구분 › 항목 제목을 달고, 그 아래에 그 항목의 지출을 번호 순으로 모은다.
+    // 처음에는 구분만 펼치고 항목은 접어 두어 항목별 합계부터 한눈에 보이게 한다.
+    const byNo = (a, b) => (a.no || 0) - (b.no || 0), seen = new Set();
+    for (const g of groups()) {
+      const gl = list.filter((r) => r.cat === g.name && g.items.some((x) => x.item === r.item));
+      if (!gl.length) continue;
+      let inner = '';
+      for (const x of g.items) {
+        const il = gl.filter((r) => r.item === x.item).sort(byNo);
+        if (!il.length) continue;
+        il.forEach((r) => seen.add(r.id));
+        inner += box('i:' + g.name + '\t' + x.item, false, 'ih', x.item, info(il, Number(x.budget) || 0), il.map(recRow).join(''));
+      }
+      html += box('g:' + g.name, true, 'gh', g.name, info(gl, g.budget), inner);
     }
+    const rest = list.filter((r) => !seen.has(r.id)).sort(byNo);
+    if (rest.length) html += box('g:~', true, 'gh', '예산표에 없는 항목', info(rest), rest.map(recRow).join(''));
   }
-  const rest = list.filter((r) => !seen.has(r.id)).sort(byNo);
-  if (rest.length) html += head('gh', '예산표에 없는 항목', rest) + rest.map(recRow).join('');
   $('list').innerHTML = html;
+  drawFoldBtn();
+}
+
+// 「모두 펼치기 / 모두 접기」 단추. 검색 중에는 이미 모두 펼쳐져 있으므로 숨긴다.
+function drawFoldBtn() {
+  const ds = [...document.querySelectorAll('#list details.fd')], b = $('btnFold');
+  b.hidden = !ds.length || !!$('q').value.trim();
+  b.textContent = ds.some((d) => !d.open) ? '모두 펼치기' : '모두 접기';
+}
+function foldAll() {
+  const ds = [...document.querySelectorAll('#list details.fd')], open = ds.some((d) => !d.open);
+  ds.forEach((d) => { d.open = open; FOLD[d.dataset.k] = open; });
+  saveFold(); drawFoldBtn();
 }
 
 function recRow(r) {
@@ -810,7 +849,7 @@ async function saveEdit(date, place, raw, amt, m) {
   } else if (r.sent) r.nPhoto = 0;
   if (r.sent) r.dirty = true;
   r.sync = 'pending';
-  save(); $('dlgAdd').close(); render();
+  unfold(r); save(); $('dlgAdd').close(); render();
   toast(!kept ? '사진을 이 기기에 보관하지 못했습니다. 창을 닫지 말고 올라갈 때까지 기다려 주세요.' : (S.cfg.url ? '고쳤습니다. 드라이브에도 고칩니다…' : '이 기기에서 고쳤습니다.'), kept ? 2600 : 5000);
   syncAll();
 }
@@ -831,7 +870,7 @@ async function saveRec() {
   $('btnSave').disabled = true;
   const kept = F.shots.length ? await photos.put(r.id, F.shots) : true;
   $('btnSave').disabled = false;
-  S.recs.push(r); save(); $('dlgAdd').close(); render();
+  S.recs.push(r); unfold(r); save(); $('dlgAdd').close(); render();
   if (!kept) toast('사진을 이 기기에 보관하지 못했습니다. 창을 닫지 말고 올라갈 때까지 기다려 주세요.', 5000);
   else toast(S.cfg.url ? '기록했습니다. 드라이브로 올립니다…' : '이 기기에 기록했습니다.');
   syncAll();
@@ -1047,6 +1086,7 @@ $('btnNH').onclick = () => { $('sSpread').value = DEF.spread; $('sFee').value = 
 ['sAUD', 'sSpread', 'sFee'].forEach((id) => ($(id).oninput = nhPrev));
 $('btnView').onclick = () => { S.cfg.view = S.cfg.view === 'new' ? 'item' : 'new'; save(); renderList(); };
 $('btnAttGo').onclick = makeAtt;
+$('btnFold').onclick = foldAll;
 $('tFrom').onchange = $('tTo').onchange = attInfo;
 $('btnAdd').onclick = () => openAdd();
 $('btnSet').onclick = openSet;
@@ -1071,6 +1111,11 @@ $('segItem').onclick = (e) => { const b = e.target.closest('button'); if (b) { F
 $('segCur').onclick = (e) => { const b = e.target.closest('button'); if (b) { F.cur = b.dataset.v; drawForm(); } };
 $('shots').onclick = (e) => { const b = e.target.closest('[data-rm]'); if (b) { F.shots.splice(+b.dataset.rm, 1); drawForm(); } };
 $('list').onclick = (e) => {
+  // 제목을 누른 순간에는 아직 open 이 바뀌기 전이므로 반대 값을 기억한다. 검색 중에 펼친 것은 기억하지 않는다.
+  const sm = e.target.closest('details.fd > summary');
+  if (sm) { const d = sm.parentElement;
+    if (!$('q').value.trim()) { FOLD[d.dataset.k] = !d.open; saveFold(); }
+    setTimeout(drawFoldBtn); return; }
   const ed = e.target.closest('[data-edit]');
   if (ed) { const r = S.recs.find((x) => x.id === ed.dataset.edit); if (r && !r.del) openAdd(r); return; }
   const b = e.target.closest('[data-del]'); if (!b) return;
